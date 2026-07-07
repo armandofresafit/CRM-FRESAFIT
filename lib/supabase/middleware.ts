@@ -38,19 +38,21 @@ export async function updateSession(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const esPublica = RUTAS_PUBLICAS.some((r) => path.startsWith(r));
 
-  // Sin sesión y en ruta protegida → al login.
-  if (!user && !esPublica) {
+  // Redirige copiando las cookies de sesión ya refrescadas por getUser(); si no,
+  // los tokens rotados se perderían y la sesión podría romperse.
+  function redirigir(pathname: string) {
     const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+    url.pathname = pathname;
+    const res = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach((c) => res.cookies.set(c));
+    return res;
   }
 
+  // Sin sesión y en ruta protegida → al login.
+  if (!user && !esPublica) return redirigir("/login");
+
   // Con sesión y en el login → directo al tablero.
-  if (user && path === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/tareas";
-    return NextResponse.redirect(url);
-  }
+  if (user && path === "/login") return redirigir("/tareas");
 
   return supabaseResponse;
 }
