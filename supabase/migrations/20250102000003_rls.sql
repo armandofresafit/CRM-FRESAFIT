@@ -13,8 +13,6 @@
 -- Exponer las tablas nuevas a la API (RLS sigue gobernando las filas).
 grant all on all tables    in schema public to anon, authenticated;
 grant all on all sequences in schema public to anon, authenticated;
-grant execute on function public.puede_ver_tarea(uuid)        to anon, authenticated;
-grant execute on function public.puede_contribuir_tarea(uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Helpers de visibilidad (SECURITY DEFINER: leen tasks sin recursión de RLS).
@@ -42,6 +40,10 @@ returns boolean language sql stable security definer set search_path = public as
   select public.es_gestor()
       or exists (select 1 from public.tasks t where t.id = tid and t.responsable_id = auth.uid());
 $$;
+
+-- Permisos de ejecución (ya creadas las funciones).
+grant execute on function public.puede_ver_tarea(uuid)        to anon, authenticated;
+grant execute on function public.puede_contribuir_tarea(uuid) to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Habilitar RLS en las tablas nuevas.
