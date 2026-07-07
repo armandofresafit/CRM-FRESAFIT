@@ -2,8 +2,9 @@
 -- Fresafit CRM — Migración: 4 roles, áreas del spec, estados/prioridades
 -- ----------------------------------------------------------------------------
 -- Amplía el baseline de Aaron al spec completo. Es ADITIVA e idempotente en lo
--- posible. Primero re-mapea los datos existentes y LUEGO endurece los CHECK,
--- para no romper filas ya guardadas.
+-- posible. Primero QUITA los CHECK viejos, LUEGO re-mapea los datos y AL FINAL
+-- vuelve a endurecer los CHECK. El orden importa: si se remapea con los CHECK
+-- viejos aún puestos, éstos rechazan los valores nuevos (p. ej. 'direccion').
 --
 -- Cambios:
 --   * profiles.rol: admin/miembro  ->  direccion/coordinador/miembro/externo
@@ -16,7 +17,17 @@
 -- ============================================================================
 
 -- ---------------------------------------------------------------------------
--- 1) Re-mapear DATOS existentes ANTES de cambiar los CHECK.
+-- 1) Quitar los CHECK viejos ANTES de remapear (Postgres nombra los inline como
+--    <tabla>_<col>_check). Si no, el CHECK viejo rechaza los valores nuevos.
+-- ---------------------------------------------------------------------------
+alter table public.profiles drop constraint if exists profiles_rol_check;
+alter table public.profiles drop constraint if exists profiles_area_check;
+alter table public.tasks    drop constraint if exists tasks_area_check;
+alter table public.tasks    drop constraint if exists tasks_prioridad_check;
+alter table public.tasks    drop constraint if exists tasks_estado_check;
+
+-- ---------------------------------------------------------------------------
+-- 2) Re-mapear DATOS existentes (ya sin CHECK que estorbe).
 -- ---------------------------------------------------------------------------
 update public.profiles set rol = 'direccion' where rol = 'admin';
 
@@ -45,14 +56,8 @@ update public.tasks set area = case area
   else area end;
 
 -- ---------------------------------------------------------------------------
--- 2) Reemplazar los CHECK (Postgres nombra los inline como <tabla>_<col>_check).
+-- 3) Volver a poner los CHECK, ya endurecidos a los valores nuevos.
 -- ---------------------------------------------------------------------------
-alter table public.profiles drop constraint if exists profiles_rol_check;
-alter table public.profiles drop constraint if exists profiles_area_check;
-alter table public.tasks    drop constraint if exists tasks_area_check;
-alter table public.tasks    drop constraint if exists tasks_prioridad_check;
-alter table public.tasks    drop constraint if exists tasks_estado_check;
-
 alter table public.profiles
   add constraint profiles_rol_check
   check (rol in ('direccion','coordinador','miembro','externo'));
@@ -77,7 +82,7 @@ alter table public.tasks
 alter table public.tasks alter column area set default 'operaciones';
 
 -- ---------------------------------------------------------------------------
--- 3) Helpers de rol (SECURITY DEFINER para no disparar RLS recursivo).
+-- 4) Helpers de rol (SECURITY DEFINER para no disparar RLS recursivo).
 -- ---------------------------------------------------------------------------
 create or replace function public.mi_rol()
 returns text language sql stable security definer set search_path = public as $$
