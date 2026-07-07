@@ -51,8 +51,22 @@ async function main() {
     return;
   }
 
+  // Guarda anti-duplicado: no importar si ya hay tareas (evita duplicar en un
+  // segundo run accidental; para reimportar, vacía la tabla primero).
+  const { count } = await admin.from("tasks").select("id", { count: "exact", head: false });
+  if (count && count > 0) {
+    console.log(`La tabla tasks ya tiene ${count} tareas; se aborta para no duplicar.`);
+    return;
+  }
+
   const equipo = await mapaEquipo();
   const fallback = equipo["armando"] ?? null;
+
+  // Avisar de responsables que no se pudieron mapear (quedarán "Sin asignar").
+  const noMapeados = [...new Set(tareas.map((t) => t.responsable).filter((r) => r && !equipo[r]))];
+  if (noMapeados.length) {
+    console.warn(`⚠️  responsables no reconocidos → "Sin asignar": ${noMapeados.join(", ")}`);
+  }
 
   const filas = tareas.map((t) => ({
     titulo: t.titulo,

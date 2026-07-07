@@ -4,7 +4,8 @@ import { useOptimistic, useState, useTransition } from "react";
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -47,7 +48,12 @@ export function Board({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Ratón: arrastre tras 6px. Táctil: retención de 200ms para no capturar el
+    // scroll (un swipe rápido desplaza; mantener pulsado inicia el arrastre).
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 8 },
+    }),
   );
 
   const filtradas = tareas.filter(
@@ -63,8 +69,12 @@ export function Board({
 
     startTransition(async () => {
       aplicarMovimiento({ id, nuevoEstado });
-      const r = await moverTarea(id, nuevoEstado);
-      if ("error" in r) toast.error("No se pudo mover: " + r.error);
+      try {
+        const r = await moverTarea(id, nuevoEstado);
+        if ("error" in r) toast.error("No se pudo mover: " + r.error);
+      } catch {
+        toast.error("No se pudo mover la tarea. Revisa tu conexión.");
+      }
     });
   }
 

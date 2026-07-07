@@ -55,7 +55,8 @@ export function TaskDialog({
   const [titulo, setTitulo] = useState(tarea?.titulo ?? "");
   const [descripcion, setDescripcion] = useState(tarea?.descripcion ?? "");
   const [responsable, setResponsable] = useState(
-    tarea?.responsable_id ?? currentUserId ?? SIN_ASIGNAR,
+    // Al EDITAR se respeta "Sin asignar" (null); el default a mí solo aplica al crear.
+    tarea ? (tarea.responsable_id ?? SIN_ASIGNAR) : currentUserId || SIN_ASIGNAR,
   );
   const [area, setArea] = useState<AreaId>(tarea?.area ?? "general");
   const [prioridad, setPrioridad] = useState<PrioridadId>(
@@ -79,15 +80,19 @@ export function TaskDialog({
       fecha_limite: fecha || null,
     };
     startTransition(async () => {
-      const r = esNueva
-        ? await crearTarea(input)
-        : await editarTarea(tarea!.id, input);
-      if ("error" in r) {
-        toast.error(r.error);
-        return;
+      try {
+        const r = esNueva
+          ? await crearTarea(input)
+          : await editarTarea(tarea!.id, input);
+        if ("error" in r) {
+          toast.error(r.error);
+          return;
+        }
+        toast.success(esNueva ? "Tarea creada." : "Cambios guardados.");
+        onClose();
+      } catch {
+        toast.error("No se pudo guardar. Revisa tu conexión.");
       }
-      toast.success(esNueva ? "Tarea creada." : "Cambios guardados.");
-      onClose();
     });
   }
 
@@ -96,13 +101,17 @@ export function TaskDialog({
     if (!confirm("¿Seguro que quieres borrar esta tarea? No se puede deshacer."))
       return;
     startTransition(async () => {
-      const r = await borrarTarea(tarea.id);
-      if ("error" in r) {
-        toast.error(r.error);
-        return;
+      try {
+        const r = await borrarTarea(tarea.id);
+        if ("error" in r) {
+          toast.error(r.error);
+          return;
+        }
+        toast.success("Tarea borrada.");
+        onClose();
+      } catch {
+        toast.error("No se pudo borrar. Revisa tu conexión.");
       }
-      toast.success("Tarea borrada.");
-      onClose();
     });
   }
 

@@ -39,7 +39,7 @@ export function TaskCard({
       onClick={() => onEditar?.(tarea)}
       className={cn(
         "rounded-lg border-l-4 bg-card p-3 shadow-sm transition-shadow hover:shadow-md",
-        !overlay && "cursor-grab touch-none active:cursor-grabbing",
+        !overlay && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-50",
       )}
     >
@@ -96,6 +96,7 @@ export function TaskCard({
           {idx > 0 && (
             <button
               type="button"
+              aria-label={`Mover a ${ESTADOS[idx - 1].nombre}`}
               title={`Mover a ${ESTADOS[idx - 1].nombre}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -103,12 +104,13 @@ export function TaskCard({
               }}
               className="rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             >
-              ◀
+              <span aria-hidden="true">◀</span>
             </button>
           )}
           {idx < ESTADOS.length - 1 && (
             <button
               type="button"
+              aria-label={`Mover a ${ESTADOS[idx + 1].nombre}`}
               title={`Mover a ${ESTADOS[idx + 1].nombre}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -116,7 +118,7 @@ export function TaskCard({
               }}
               className="rounded-md border px-2 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             >
-              ▶
+              <span aria-hidden="true">▶</span>
             </button>
           )}
           <button
