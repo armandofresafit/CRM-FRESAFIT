@@ -115,6 +115,17 @@ export async function moverTarea(id: string, estado: EstadoId): Promise<Resultad
   return { ok: true };
 }
 
+/* Cambiar prioridad rápido desde una celda (meta → solo gestor). */
+export async function cambiarPrioridad(id: string, prioridad: PrioridadId): Promise<Resultado> {
+  const { supabase, user, rol } = await usuarioActual();
+  if (!user) return { error: "No autenticado." };
+  if (!esGestor(rol)) return { error: "Solo dirección o coordinación puede cambiar la prioridad." };
+  const { error } = await supabase.from("tasks").update({ prioridad }).eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/tareas");
+  return { ok: true };
+}
+
 export async function borrarTarea(id: string): Promise<Resultado> {
   const { supabase, user, rol } = await usuarioActual();
   if (!user) return { error: "No autenticado." };
