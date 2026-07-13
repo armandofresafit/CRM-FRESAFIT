@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { usuarioActual, esInterno } from "@/lib/supabase/usuario-actual";
 import { esGestor } from "@/lib/catalogos";
+import { sincronizacionCompleta } from "@/lib/tiendanube/sync";
 import type { EstadoPedidoProvId, TipoProductoId } from "@/lib/types";
 
 type Resultado = { ok: true } | { error: string };
@@ -43,6 +44,27 @@ export type PedidoProvInput = {
   notas: string;
   items: PedidoProvItemInput[];
 };
+
+/* ============================ Tienda Nube ================================= */
+
+/* Reconciliación manual con el catálogo de Tienda Nube (botón del panel).
+   La importación automática corre por webhooks + cron; esto es el respaldo. */
+export async function sincronizarTiendanube(): Promise<{ ok: true; detalle: string } | { error: string }> {
+  const { user, rol } = await usuarioActual();
+  if (!user) return { error: "No autenticado." };
+  if (!esInterno(rol)) return { error: "Solo el equipo interno puede sincronizar el inventario." };
+
+  try {
+    const r = await sincronizacionCompleta();
+    revalidatePath("/inventario");
+    return {
+      ok: true,
+      detalle: `Sincronizado: ${r.productos} productos (${r.creados} nuevos, ${r.actualizados} actualizados${r.desactivados ? `, ${r.desactivados} desactivados` : ""}).`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falló la sincronización con Tienda Nube." };
+  }
+}
 
 /* ============================ Productos =================================== */
 

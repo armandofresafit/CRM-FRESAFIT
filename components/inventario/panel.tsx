@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { AlertTriangle, RefreshCw, Store } from "lucide-react";
+import { toast } from "sonner";
 import { esGestor } from "@/lib/catalogos";
+import { sincronizarTiendanube } from "@/app/(app)/inventario/actions";
 import type {
   ProductConProveedor,
   Supplier,
@@ -37,14 +39,41 @@ export function PanelInventario({
   proveedores,
   pedidos,
   rol,
+  tiendanube,
 }: {
   productos: ProductConProveedor[];
   proveedores: Supplier[];
   pedidos: SupplierOrderConDetalle[];
   rol: RolId;
+  tiendanube: { conectada: boolean; ultimaSync: string | null };
 }) {
   const gestor = esGestor(rol);
   const [pestana, setPestana] = useState<Pestana>("productos");
+  const [sincronizando, startSync] = useTransition();
+
+  /* Aviso al volver del OAuth de Tienda Nube (?tiendanube=conectada|error). */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const estado = params.get("tiendanube");
+    if (!estado) return;
+    if (estado === "conectada") {
+      const n = params.get("productos");
+      toast.success(`Tienda Nube conectada${n ? ` · ${n} productos importados` : ""}.`);
+      if (params.get("webhooks") === "pendientes")
+        toast.info("La actualización automática (webhooks) se activará con el deploy en Vercel.");
+    } else {
+      toast.error("No se pudo conectar Tienda Nube. Intenta de nuevo.");
+    }
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
+  function sincronizar() {
+    startSync(async () => {
+      const r = await sincronizarTiendanube();
+      if ("error" in r) toast.error(r.error);
+      else toast.success(r.detalle);
+    });
+  }
 
   /* null = cerrado; "nuevo" = alta; objeto = edición. */
   const [productoDialog, setProductoDialog] = useState<ProductConProveedor | "nuevo" | null>(null);
@@ -67,9 +96,37 @@ export function PanelInventario({
           <h1 className="text-2xl font-bold">Inventario y proveedores</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Cuánto hay de cada producto, quién lo surte y qué viene en camino.
+            {tiendanube.conectada && tiendanube.ultimaSync && (
+              <span className="ml-1">
+                · Tienda Nube sincronizada el{" "}
+                {new Date(tiendanube.ultimaSync).toLocaleString("es-MX", {
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+                .
+              </span>
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {tiendanube.conectada ? (
+            <Button variant="outline" onClick={sincronizar} disabled={sincronizando}>
+              <RefreshCw className={cn("size-4", sincronizando && "animate-spin")} aria-hidden="true" />
+              {sincronizando ? "Sincronizando…" : "Sincronizar Tienda Nube"}
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => {
+                window.location.href = "/api/tiendanube/conectar";
+              }}
+            >
+              <Store className="size-4" aria-hidden="true" />
+              Conectar Tienda Nube
+            </Button>
+          )}
           <div className="inline-flex rounded-lg bg-muted p-0.5">
             {PESTANAS.map(([id, label]) => (
               <button

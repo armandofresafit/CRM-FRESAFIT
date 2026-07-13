@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { estadoTiendanube } from "@/lib/tiendanube/api";
 import { PanelInventario } from "@/components/inventario/panel";
 import type { ProductConProveedor, Supplier, SupplierOrderConDetalle, RolId } from "@/lib/types";
 
@@ -11,7 +12,7 @@ export default async function InventarioPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [productosRes, proveedoresRes, pedidosRes, perfilRes] = await Promise.all([
+  const [productosRes, proveedoresRes, pedidosRes, perfilRes, tiendanube] = await Promise.all([
     supabase
       .from("products")
       .select("*, proveedor:suppliers!proveedor_id(id, nombre)")
@@ -26,6 +27,7 @@ export default async function InventarioPage() {
     user
       ? supabase.from("profiles").select("rol").eq("id", user.id).single()
       : Promise.resolve({ data: null }),
+    estadoTiendanube(),
   ]);
 
   const productos = (productosRes.data ?? []) as unknown as ProductConProveedor[];
@@ -33,5 +35,13 @@ export default async function InventarioPage() {
   const pedidos = (pedidosRes.data ?? []) as unknown as SupplierOrderConDetalle[];
   const rol = ((perfilRes.data as { rol?: RolId } | null)?.rol ?? "miembro") as RolId;
 
-  return <PanelInventario productos={productos} proveedores={proveedores} pedidos={pedidos} rol={rol} />;
+  return (
+    <PanelInventario
+      productos={productos}
+      proveedores={proveedores}
+      pedidos={pedidos}
+      rol={rol}
+      tiendanube={tiendanube}
+    />
+  );
 }

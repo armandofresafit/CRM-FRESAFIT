@@ -46,3 +46,4 @@ next-env.d.ts
 respaldo-fresafit-crm-*.json
 # Vercel
 .vercel
+usuarios-fresafit.txt

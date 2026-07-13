@@ -119,7 +119,8 @@ export type Supplier = {
   updated_at: string | null;
 };
 
-/* Producto (tabla `products`). */
+/* Producto (tabla `products`). Los campos tiendanube_* mapean el renglón a
+   una variante de Tienda Nube (null = producto capturado a mano). */
 export type Product = {
   id: string;
   nombre: string;
@@ -132,6 +133,9 @@ export type Product = {
   proveedor_id: string | null;
   activo: boolean;
   notas: string | null;
+  sku: string | null;
+  tiendanube_product_id: number | null;
+  tiendanube_variant_id: number | null;
   created_by: string | null;
   created_at: string;
   updated_at: string | null;

@@ -4,7 +4,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const RUTAS_PUBLICAS = ["/login", "/auth"];
+/* /api/tiendanube queda fuera del gate de sesión: los webhooks llegan sin
+   cookies (validan firma HMAC) y conectar/callback verifican sesión adentro. */
+const RUTAS_PUBLICAS = ["/login", "/auth", "/api/tiendanube"];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
