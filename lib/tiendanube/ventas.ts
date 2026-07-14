@@ -38,15 +38,23 @@ function estaCancelada(o: OrdenTN): boolean {
   return o.status === "cancelled" || o.payment_status === "refunded" || o.payment_status === "voided";
 }
 
+/* Correo del comprador, normalizado: es la llave con la que se identifica al
+   cliente (Tienda Nube no expone un id de cliente en sus órdenes). */
+function correoDe(orden: OrdenTN): string | null {
+  const c = orden.contact_email?.trim().toLowerCase();
+  return c || null;
+}
+
 /* Renglones de `sales` de una orden (la orden ya debe ser vendible). */
 function filasDeOrden(
   orden: OrdenTN,
   productoPorVariante: Map<number, string>,
-  clientePorTN: Map<number, string>,
+  clientePorCorreo: Map<string, string>,
 ) {
   const fecha = (orden.paid_at ?? orden.created_at).slice(0, 10);
-  const cliente = orden.customer?.name?.trim();
-  const clienteId = orden.customer?.id ? (clientePorTN.get(orden.customer.id) ?? null) : null;
+  const cliente = orden.contact_name?.trim();
+  const correo = correoDe(orden);
+  const clienteId = correo ? (clientePorCorreo.get(correo) ?? null) : null;
   return (orden.products ?? []).map((linea) => {
     const cantidad = Math.max(1, Math.trunc(Number(linea.quantity) || 1));
     const unitario = Number(linea.price) || 0;
@@ -66,45 +74,43 @@ function filasDeOrden(
 }
 
 /* Crea/actualiza los clientes de las órdenes y devuelve el mapa
-   id de cliente en Tienda Nube → id de cliente del CRM. Así el historial de
-   compras se llena solo: nadie captura clientes a mano. */
-async function sincronizarClientes(ordenes: OrdenTN[]): Promise<Map<number, string>> {
+   correo → id de cliente del CRM. Así el historial de compras se llena solo:
+   nadie captura clientes a mano. */
+async function sincronizarClientes(ordenes: OrdenTN[]): Promise<Map<string, string>> {
   const admin = createAdminClient();
 
-  const porTN = new Map<number, { nombre: string; correo: string | null; telefono: string | null }>();
+  /* Un cliente por correo; se queda con el nombre/teléfono de su orden más
+     reciente (las órdenes llegan de la más nueva a la más vieja). */
+  const porCorreo = new Map<string, { nombre: string; telefono: string | null }>();
   for (const o of ordenes) {
-    const c = o.customer;
-    if (!c?.id) continue;
-    porTN.set(c.id, {
-      nombre: c.name?.trim() || "(sin nombre)",
-      correo: c.email?.trim() || null,
-      telefono: c.phone?.trim() || null,
+    const correo = correoDe(o);
+    if (!correo || porCorreo.has(correo)) continue;
+    porCorreo.set(correo, {
+      nombre: o.contact_name?.trim() || correo,
+      telefono: o.contact_phone?.trim() || null,
     });
   }
-  if (porTN.size === 0) return new Map();
+  if (porCorreo.size === 0) return new Map();
 
-  const filas = [...porTN.entries()].map(([tnId, c]) => ({
-    tiendanube_customer_id: tnId,
+  const filas = [...porCorreo.entries()].map(([correo, c]) => ({
+    correo,
     nombre: c.nombre,
-    correo: c.correo,
     telefono: c.telefono,
     canal: "tienda_nube",
   }));
 
-  /* Upsert por tiendanube_customer_id: los datos de contacto se refrescan
-     desde la tienda; `notas` no se toca (es del equipo). */
-  const { error } = await admin
-    .from("customers")
-    .upsert(filas, { onConflict: "tiendanube_customer_id" });
+  /* Upsert por correo: el contacto se refresca desde la tienda; `notas` no se
+     toca (es del equipo) porque no va en el payload. */
+  const { error } = await admin.from("customers").upsert(filas, { onConflict: "correo" });
   if (error) throw new Error(error.message);
 
   const { data, error: errSel } = await admin
     .from("customers")
-    .select("id, tiendanube_customer_id")
-    .in("tiendanube_customer_id", [...porTN.keys()]);
+    .select("id, correo")
+    .in("correo", [...porCorreo.keys()]);
   if (errSel) throw new Error(errSel.message);
 
-  return new Map((data ?? []).map((c) => [c.tiendanube_customer_id as number, c.id as string]));
+  return new Map((data ?? []).map((c) => [c.correo as string, c.id as string]));
 }
 
 /* Mapa variante de Tienda Nube → id de producto del CRM. */

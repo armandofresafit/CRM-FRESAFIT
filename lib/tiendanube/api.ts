@@ -188,12 +188,11 @@ export type OrdenTN = {
   paid_at?: string | null;
   total: string;
   products: LineaOrdenTN[];
-  customer?: {
-    id?: number;
-    name?: string | null;
-    email?: string | null;
-    phone?: string | null;
-  } | null;
+  /* OJO: Tienda Nube NO envía `customer` en las órdenes (ni en el listado ni en
+     /orders/{id}); los datos del comprador vienen en estos campos planos. */
+  contact_name?: string | null;
+  contact_email?: string | null;
+  contact_phone?: string | null;
 };
 
 export async function obtenerOrdenTN(cx: ConexionTN, id: number): Promise<OrdenTN | null> {
