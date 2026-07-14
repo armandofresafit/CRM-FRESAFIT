@@ -82,13 +82,23 @@ export const CANALES = [
   { id: "otro", nombre: "Otro", color: "#94a3b8" },
 ] as const;
 
+/* --- Categorías de gasto (Fase 3: Finanzas). --- */
+export const CATEGORIAS_GASTO = [
+  { id: "marketing", nombre: "Marketing", color: "#e84393" },
+  { id: "producto", nombre: "Producto", color: "#0984e3" },
+  { id: "operacion", nombre: "Operación", color: "#6c5ce7" },
+  { id: "logistica", nombre: "Logística", color: "#e17055" },
+  { id: "nomina", nombre: "Nómina", color: "#00b894" },
+  { id: "otro", nombre: "Otro", color: "#94a3b8" },
+] as const;
+
 /* --- Menú lateral: los 6 módulos del CRM, en el orden de prioridad de Armando.
-   "activo: true" = construido. --- */
+   "activo: true" = construido. "soloDireccion" = oculto para los demás roles. --- */
 export const MODULOS = [
   { id: "tareas", nombre: "Tareas", icono: "✅", href: "/tareas", activo: true },
   { id: "inventario", nombre: "Inventario", icono: "🏷️", href: "/inventario", activo: true },
   { id: "metricas", nombre: "Métricas", icono: "📊", href: "/metricas", activo: true },
-  { id: "finanzas", nombre: "Finanzas y gastos", icono: "💰", href: "/finanzas", activo: false },
+  { id: "finanzas", nombre: "Finanzas y gastos", icono: "💰", href: "/finanzas", activo: true, soloDireccion: true },
   { id: "clientes", nombre: "Clientes y ventas", icono: "🧑", href: "/clientes", activo: false },
   { id: "pedidos", nombre: "Pedidos y envíos", icono: "📦", href: "/pedidos", activo: false },
 ] as const;
@@ -137,6 +147,9 @@ export function obtenerEstadoPedidoProv(id: string) {
 }
 export function obtenerCanal(id: string) {
   return CANALES.find((c) => c.id === id) ?? null;
+}
+export function obtenerCategoriaGasto(id: string) {
+  return CATEGORIAS_GASTO.find((c) => c.id === id) ?? null;
 }
 
 /* --- Ayudantes de rol --- */

@@ -11,6 +11,7 @@ import type {
   TIPOS_PRODUCTO,
   ESTADOS_PEDIDO_PROVEEDOR,
   CANALES,
+  CATEGORIAS_GASTO,
 } from "@/lib/catalogos";
 
 /* Uniones de literales derivadas de los catálogos (p. ej. "por_hacer" | ...). */
@@ -22,6 +23,7 @@ export type EtiquetaId = (typeof ETIQUETAS)[number]["id"];
 export type TipoProductoId = (typeof TIPOS_PRODUCTO)[number]["id"];
 export type EstadoPedidoProvId = (typeof ESTADOS_PEDIDO_PROVEEDOR)[number]["id"];
 export type CanalId = (typeof CANALES)[number]["id"];
+export type CategoriaGastoId = (typeof CATEGORIAS_GASTO)[number]["id"];
 
 /* Perfil de usuario (tabla `profiles`, 1:1 con auth.users). */
 export type Profile = {
@@ -201,4 +203,34 @@ export type Sale = {
 
 export type SaleConProducto = Sale & {
   producto: Pick<Product, "id" | "nombre" | "variante"> | null;
+};
+
+/* --- Módulo Finanzas (Fase 3, solo dirección) --- */
+
+/* Gasto (tabla `expenses`). Los ingresos NO se capturan: salen de `sales`. */
+export type Expense = {
+  id: string;
+  fecha: string; // "AAAA-MM-DD"
+  concepto: string;
+  monto: number;
+  categoria: CategoriaGastoId;
+  proveedor: string | null;
+  notas: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+/* Comprobante/factura de un gasto (binario en el bucket privado `facturas`). */
+export type ExpenseReceipt = {
+  id: string;
+  expense_id: string;
+  nombre: string;
+  storage_path: string;
+  tipo: string | null;
+  created_at: string;
+};
+
+export type ExpenseConComprobantes = Expense & {
+  comprobantes: ExpenseReceipt[];
 };

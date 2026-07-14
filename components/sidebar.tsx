@@ -48,8 +48,12 @@ export function Sidebar({
     ROLES.find((r) => r.id === profile?.rol)?.nombre ?? "Miembro";
   const nombre = profile?.nombre || email;
 
-  const activos = MODULOS.filter((m) => m.activo);
-  const proximos = MODULOS.filter((m) => !m.activo);
+  /* Finanzas solo existe para Dirección: ni siquiera aparece en el menú del
+     resto (la BD lo refuerza con RLS; esto es para no tentar ni confundir). */
+  const visible = (m: (typeof MODULOS)[number]) =>
+    !("soloDireccion" in m && m.soloDireccion) || profile?.rol === "direccion";
+  const activos = MODULOS.filter((m) => m.activo && visible(m));
+  const proximos = MODULOS.filter((m) => !m.activo && visible(m));
 
   return (
     <aside className="flex w-[272px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar p-4.5 pb-4 max-md:w-full max-md:border-b max-md:border-r-0">
