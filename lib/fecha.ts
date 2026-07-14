@@ -11,11 +11,18 @@ export function formatearFecha(iso: string): string {
   return `${parseInt(dd, 10)} ${MESES[parseInt(mm, 10) - 1]}`;
 }
 
-/* Hoy en formato AAAA-MM-DD, en la zona horaria LOCAL del usuario.
-   (Usar toISOString() daría la fecha UTC y marcaría tareas como vencidas
-   horas antes en husos negativos como México, UTC-6.) */
+/* Fecha/hora actual vista desde México (zona del negocio). Anclarla aquí hace
+   que el servidor (UTC en Vercel) y el navegador calculen el MISMO día: sin
+   esto, el HTML del servidor y el del cliente difieren cerca de la medianoche
+   y React truena la hidratación (error #418), además de marcar vencidas y
+   periodos con horas de adelanto. */
+export function ahoraMX(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "America/Mexico_City" }));
+}
+
+/* Hoy en formato AAAA-MM-DD (zona de México). */
 export function hoyISO(): string {
-  const d = new Date();
+  const d = ahoraMX();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${mm}-${dd}`;
@@ -36,9 +43,9 @@ function aISO(d: Date): string {
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
-/* Fecha local desplazada n días respecto a hoy (n negativo = pasado). */
+/* Fecha (zona de México) desplazada n días respecto a hoy (negativo = pasado). */
 export function diasDesdeHoy(n: number): string {
-  const d = new Date();
+  const d = ahoraMX();
   d.setDate(d.getDate() + n);
   return aISO(d);
 }
@@ -51,7 +58,7 @@ export function rangosDePeriodo(id: "hoy" | "semana" | "mes" | "mes_pasado"): {
   actual: Periodo;
   anterior: Periodo;
 } {
-  const hoy = new Date();
+  const hoy = ahoraMX();
   const y = hoy.getFullYear();
   const m = hoy.getMonth();
 

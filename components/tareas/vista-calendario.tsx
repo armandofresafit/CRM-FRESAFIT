@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { obtenerEstado } from "@/lib/catalogos";
-import { matrizMes, nombreMes, hoyISO, esVencida } from "@/lib/fecha";
+import { matrizMes, nombreMes, hoyISO, esVencida, ahoraMX } from "@/lib/fecha";
 import type { TaskConResponsable } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,7 @@ export function VistaCalendario({
   onAbrir: (t: TaskConResponsable) => void;
 }) {
   const [ym, setYm] = useState(() => {
-    const d = new Date();
+    const d = ahoraMX(); // anclado a México: el servidor (UTC) pintaría otro mes en el cambio de mes
     return { anio: d.getFullYear(), mes: d.getMonth() };
   });
 

@@ -35,11 +35,13 @@ const ETIQUETA_NUEVO: Record<Pestana, string> = {
 };
 
 function fechaCorta(iso: string): string {
+  // timeZone fija: el servidor (UTC) y el navegador deben pintar lo mismo.
   return new Date(iso).toLocaleString("es-MX", {
     day: "numeric",
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "America/Mexico_City",
   });
 }
 
