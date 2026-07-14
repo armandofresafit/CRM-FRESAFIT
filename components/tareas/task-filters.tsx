@@ -23,7 +23,7 @@ export function TaskFilters({
       value={filtroArea}
       onValueChange={(v) => setFiltroArea(v ?? "todas")}
     >
-      <SelectTrigger className="w-[160px]">
+      <SelectTrigger className="w-[160px] bg-card">
         <SelectValue>
           {(value: string) =>
             value === "todas" ? "Todas las áreas" : (AREAS.find((a) => a.id === value)?.nombre ?? "Área")}

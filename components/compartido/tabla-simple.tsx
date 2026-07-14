@@ -16,11 +16,11 @@ export function TablaSimple({
   children: ReactNode;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="overflow-x-auto rounded-2xl border bg-card shadow-sm">
       <div className={minW}>
         <div
           className={cn(
-            "grid gap-2 border-b bg-muted/40 px-3 py-2 text-xs font-bold uppercase tracking-wide text-muted-foreground",
+            "grid gap-2 border-b bg-muted/40 px-6 py-3 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground",
             cols,
           )}
         >
@@ -36,5 +36,9 @@ export function TablaSimple({
 
 /* Clases de una fila estándar; `extra` para variantes (p. ej. resaltado). */
 export function filaSimpleClases(cols: string, extra?: string) {
-  return cn("grid items-center gap-2 border-b px-3 py-2 text-sm hover:bg-muted/30", cols, extra);
+  return cn(
+    "grid items-center gap-2 border-b px-6 py-3 text-sm last:border-b-0 hover:bg-accent/30",
+    cols,
+    extra,
+  );
 }

@@ -1,32 +1,28 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { TIPOS_PRODUCTO, obtenerTipoProducto } from "@/lib/catalogos";
+import { obtenerTipoProducto } from "@/lib/catalogos";
+import { estadoStock } from "@/lib/inventario/stock";
 import { formatearMXN } from "@/lib/moneda";
 import { ajustarStock } from "@/app/(app)/inventario/actions";
 import type { ProductConProveedor } from "@/lib/types";
 import { TablaSimple, filaSimpleClases } from "@/components/compartido/tabla-simple";
 import { cn } from "@/lib/utils";
 
-const COLS = "grid-cols-[minmax(180px,1fr)_120px_140px_100px_100px_150px]";
+const COLS = "grid-cols-[minmax(180px,1fr)_120px_140px_100px_100px_215px]";
 
+/* Pastilla suave: fondo del color del tipo al 12% de opacidad + texto sólido
+   (en vez de fondo sólido + texto blanco), para verse ligera junto a las
+   demás celdas de la tabla. */
 function PastillaTipo({ tipo }: { tipo: string }) {
   const t = obtenerTipoProducto(tipo);
   if (!t) return null;
   return (
     <span
-      className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold text-white"
-      style={{ backgroundColor: t.color }}
+      className="inline-flex items-center rounded-md px-2.5 py-1 text-xs font-semibold"
+      style={{ backgroundColor: `${t.color}1F`, color: t.color }}
     >
       {t.nombre}
     </span>
@@ -35,13 +31,17 @@ function PastillaTipo({ tipo }: { tipo: string }) {
 
 export function TablaProductos({
   productos,
+  busqueda,
+  filtroTipo,
+  filtroStock,
   onEditar,
 }: {
   productos: ProductConProveedor[];
+  busqueda: string;
+  filtroTipo: string;
+  filtroStock: string; // "todos" | agotado | por_acabarse | ok
   onEditar: (p: ProductConProveedor) => void;
 }) {
-  const [busqueda, setBusqueda] = useState("");
-  const [filtroTipo, setFiltroTipo] = useState("todos");
   const [, startTransition] = useTransition();
 
   function cambiarStock(p: ProductConProveedor, delta: number) {
@@ -61,6 +61,7 @@ export function TablaProductos({
   const visibles = productos.filter(
     (p) =>
       (filtroTipo === "todos" || p.tipo === filtroTipo) &&
+      (filtroStock === "todos" || estadoStock(p) === filtroStock) &&
       (!q ||
         p.nombre.toLowerCase().includes(q) ||
         (p.variante ?? "").toLowerCase().includes(q) ||
@@ -69,32 +70,6 @@ export function TablaProductos({
 
   return (
     <div>
-      {/* Filtros: búsqueda + tipo */}
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Buscar producto, variante o proveedor…"
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          className="w-64"
-        />
-        <Select value={filtroTipo} onValueChange={(v) => setFiltroTipo(v ?? "todos")}>
-          <SelectTrigger className="w-[170px]">
-            <SelectValue>
-              {(v: string) =>
-                v === "todos" ? "Todos los tipos" : (obtenerTipoProducto(v)?.nombre ?? "Tipo")}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los tipos</SelectItem>
-            {TIPOS_PRODUCTO.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
       {visibles.length === 0 ? (
         <p className="text-sm italic text-muted-foreground">
           {productos.length === 0
@@ -105,10 +80,10 @@ export function TablaProductos({
         <TablaSimple
           cols={COLS}
           encabezados={["Producto", "Tipo", "Proveedor", "Costo", "Precio", "Stock"]}
-          minW="min-w-[820px]"
+          minW="min-w-[890px]"
         >
           {visibles.map((p) => {
-            const bajo = p.activo && p.stock <= p.stock_minimo;
+            const estado = estadoStock(p);
             return (
               <div key={p.id} className={filaSimpleClases(COLS, !p.activo ? "opacity-50" : undefined)}>
                 {/* Producto */}
@@ -148,7 +123,8 @@ export function TablaProductos({
                   <span
                     className={cn(
                       "min-w-8 text-center font-semibold tabular-nums",
-                      bajo && "text-red-600",
+                      estado === "agotado" && "text-red-600",
+                      estado === "por_acabarse" && "text-amber-600",
                     )}
                   >
                     {p.stock}
@@ -161,10 +137,23 @@ export function TablaProductos({
                   >
                     <Plus className="size-3.5" />
                   </button>
-                  {bajo && (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600 dark:bg-red-950 dark:text-red-300">
-                      Bajo
+                  {estado === "agotado" ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600 dark:bg-red-950 dark:text-red-300">
+                      <span className="size-1.5 rounded-full bg-red-500" />
+                      Agotado
                     </span>
+                  ) : estado === "por_acabarse" ? (
+                    <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+                      <span className="size-1.5 rounded-full bg-amber-500" />
+                      Por acabarse
+                    </span>
+                  ) : (
+                    p.activo && (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-green-100 px-2 py-0.5 text-[11px] font-bold text-green-700 dark:bg-green-950 dark:text-green-300">
+                        <span className="size-1.5 rounded-full bg-green-500" />
+                        OK
+                      </span>
+                    )
                   )}
                 </div>
               </div>

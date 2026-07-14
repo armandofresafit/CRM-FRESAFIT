@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Info, List, LayoutGrid, Calendar as CalendarIcon, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ESTADOS, AREAS, ROLES, esGestor } from "@/lib/catalogos";
 import { esVencida } from "@/lib/fecha";
@@ -41,9 +41,9 @@ type Alcance = "mis" | "todas";
 type VistaTop = "tabla" | "tablero" | "calendario";
 
 const VISTAS_TOP = [
-  ["tabla", "Tabla"],
-  ["tablero", "Tablero"],
-  ["calendario", "Calendario"],
+  ["tabla", "Tabla", List],
+  ["tablero", "Tablero", LayoutGrid],
+  ["calendario", "Calendario", CalendarIcon],
 ] as const;
 
 export function Board({
@@ -149,105 +149,122 @@ export function Board({
 
   return (
     <div>
-      {/* Barra superior */}
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      {/* Encabezado: título a la izquierda, acciones principales a la derecha */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Tareas del equipo</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-[26px] font-bold tracking-tight">Tareas del equipo</h1>
+          <p className="mt-1.5 text-[14.5px] text-muted-foreground">
             Quién hace qué y en qué va cada cosa — sin perseguir a nadie.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Contador de vencidas — clic para ver SOLO las vencidas (alterna). */}
-          {(vencidas > 0 || soloVencidas) && (
-            <button
-              type="button"
-              onClick={() => setSoloVencidas((v) => !v)}
-              aria-pressed={soloVencidas}
-              title="Ver solo las tareas vencidas (clic para alternar)"
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-bold transition-colors",
-                soloVencidas ? "bg-red-600 text-white" : "bg-red-100 text-red-600 hover:bg-red-200",
-              )}
-            >
-              <AlertTriangle className="size-4" aria-hidden="true" />
-              {vencidas} {vencidas === 1 ? "vencida" : "vencidas"}
-            </button>
-          )}
-
-          {/* Alcance global: Mis tareas / Todas — aplica en las TRES vistas. */}
-          <div className="inline-flex rounded-lg bg-muted p-0.5">
-            {(
-              [
-                ["mis", "Mis tareas"],
-                ["todas", "Todas"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setAlcance(id)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
-                  alcance === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Selector de vista principal: Tabla / Tablero / Calendario */}
-          <div className="inline-flex rounded-lg bg-muted p-0.5">
-            {VISTAS_TOP.map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setVistaTop(id)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
-                  vistaTop === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Filtros de PERSONA y ÁREA — solo con alcance "Todas" ("mis" ya es lo mío). */}
-          {alcance === "todas" && (
-            <>
-              <Select value={filtroResponsable} onValueChange={(v) => setFiltroResponsable(v ?? "todos")}>
-                <SelectTrigger className="w-[190px]">
-                  <SelectValue>
-                    {(value: string) =>
-                      value === "todos"
-                        ? "Todas las personas"
-                        : (equipo.find((p) => p.id === value)?.nombre ?? "Persona")}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="todos">Todas las personas</SelectItem>
-                  {equipo.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <TaskFilters filtroArea={filtroArea} setFiltroArea={setFiltroArea} />
-            </>
-          )}
-
+        <div className="flex items-center gap-2">
           <ExportButton tareas={filtradas} gestor={gestor} />
-          {gestor && <Button onClick={() => setNuevaAbierta(true)}>+ Nueva tarea</Button>}
+          {gestor && (
+            <Button
+              onClick={() => setNuevaAbierta(true)}
+              className="h-auto gap-1.5 rounded-[11px] px-[17px] py-2.5 text-[13.5px] font-semibold shadow-[0_6px_16px_-8px_rgba(232,67,147,0.7)]"
+            >
+              <Plus className="size-4" strokeWidth={2.1} />
+              Nueva tarea
+            </Button>
+          )}
         </div>
       </div>
 
+      {/* Barra de herramientas: filtros/vistas a la izquierda, filtros de persona/área a la derecha */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {/* Contador de vencidas — clic para ver SOLO las vencidas (alterna). */}
+        {(vencidas > 0 || soloVencidas) && (
+          <button
+            type="button"
+            onClick={() => setSoloVencidas((v) => !v)}
+            aria-pressed={soloVencidas}
+            title="Ver solo las tareas vencidas (clic para alternar)"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-bold transition-colors",
+              soloVencidas ? "bg-red-600 text-white" : "bg-red-100 text-red-600 hover:bg-red-200",
+            )}
+          >
+            <AlertTriangle className="size-4" aria-hidden="true" />
+            {vencidas} {vencidas === 1 ? "vencida" : "vencidas"}
+          </button>
+        )}
+
+        {/* Alcance global: Mis tareas / Todas — aplica en las TRES vistas. */}
+        <div className="inline-flex rounded-lg bg-muted p-0.5">
+          {(
+            [
+              ["mis", "Mis tareas"],
+              ["todas", "Todas"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setAlcance(id)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+                alcance === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Selector de vista principal: Tabla / Tablero / Calendario */}
+        <div className="inline-flex rounded-lg bg-muted p-0.5">
+          {VISTAS_TOP.map(([id, label, Icono]) => (
+            <button
+              key={id}
+              onClick={() => setVistaTop(id)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+                vistaTop === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+              )}
+            >
+              <Icono className="size-3.5" strokeWidth={1.8} />
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Filtros de PERSONA y ÁREA — solo con alcance "Todas" ("mis" ya es lo mío). */}
+        {alcance === "todas" && (
+          <>
+            <Select value={filtroResponsable} onValueChange={(v) => setFiltroResponsable(v ?? "todos")}>
+              <SelectTrigger className="w-[190px] bg-card">
+                <SelectValue>
+                  {(value: string) =>
+                    value === "todos"
+                      ? "Todas las personas"
+                      : (equipo.find((p) => p.id === value)?.nombre ?? "Persona")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todas las personas</SelectItem>
+                {equipo.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <TaskFilters filtroArea={filtroArea} setFiltroArea={setFiltroArea} />
+          </>
+        )}
+      </div>
+
       {/* Aviso de rol — es el rol REAL del usuario; la seguridad se aplica en la BD (RLS). */}
-      <div className="mb-4 rounded-lg border border-dashed bg-card px-3 py-2 text-xs text-muted-foreground">
-        Tu acceso: <b className="text-foreground">{rolNombre}</b> — tu rol real; los permisos se
-        aplican en la base de datos (RLS), no solo en pantalla.{" "}
-        {ROLES.find((r) => r.id === rol)?.desc}
+      <div className="mb-4 flex items-center gap-2.5 rounded-xl border bg-card px-4 py-3 text-[13px] text-muted-foreground">
+        <Info className="size-[17px] shrink-0 text-muted-foreground" strokeWidth={1.8} />
+        <span>
+          Tu acceso: <b className="font-semibold text-foreground">{rolNombre}</b> — tu rol real; los
+          permisos se aplican en la base de datos (RLS), no solo en pantalla.{" "}
+          {ROLES.find((r) => r.id === rol)?.desc}
+        </span>
       </div>
 
       {/* Carga por persona (chips clicables = atajo de filtro "solo [persona]").

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -86,8 +87,14 @@ export function ExportButton({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="outline" disabled={descargando} title="Descargar respaldo">
-            💾 {descargando ? "Generando…" : "Respaldar"}
+          <Button
+            variant="outline"
+            disabled={descargando}
+            title="Descargar respaldo"
+            className="h-auto gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
+          >
+            <Save className="size-[15px]" strokeWidth={1.8} />
+            {descargando ? "Generando…" : "Respaldar"}
           </Button>
         }
       />

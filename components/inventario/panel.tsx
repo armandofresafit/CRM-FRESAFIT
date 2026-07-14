@@ -1,9 +1,22 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { AlertTriangle, RefreshCw, ShoppingCart, Store } from "lucide-react";
+import {
+  AlertTriangle,
+  Boxes,
+  DollarSign,
+  PackageX,
+  Plus,
+  RefreshCw,
+  Search,
+  ShoppingCart,
+  Store,
+  Truck,
+} from "lucide-react";
 import { toast } from "sonner";
 import { esGestor } from "@/lib/catalogos";
+import { ESTADOS_STOCK, estadoStock, obtenerEstadoStock } from "@/lib/inventario/stock";
+import { formatearMXN } from "@/lib/moneda";
 import { sincronizarMercadolibre, sincronizarTiendanube } from "@/app/(app)/inventario/actions";
 import type {
   ProductConProveedor,
@@ -12,7 +25,17 @@ import type {
   RolId,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { StatCard } from "@/components/compartido/stat-card";
 import { cn } from "@/lib/utils";
+import { TIPOS_PRODUCTO, obtenerTipoProducto } from "@/lib/catalogos";
 import { TablaProductos } from "@/components/inventario/tabla-productos";
 import { ProductoDialog } from "@/components/inventario/producto-dialog";
 import { TablaProveedores } from "@/components/inventario/tabla-proveedores";
@@ -29,10 +52,16 @@ const PESTANAS = [
 ] as const;
 
 const ETIQUETA_NUEVO: Record<Pestana, string> = {
-  productos: "+ Nuevo producto",
-  proveedores: "+ Nuevo proveedor",
-  pedidos: "+ Nuevo pedido",
+  productos: "Nuevo producto",
+  proveedores: "Nuevo proveedor",
+  pedidos: "Nuevo pedido",
 };
+
+/* Valor compacto para la tarjeta KPI: "$684K" en vez de "$684,231.00". */
+function valorCompacto(n: number): string {
+  if (n >= 1000) return `$${Math.round(n / 1000)}K`;
+  return formatearMXN(n);
+}
 
 function fechaCorta(iso: string): string {
   // timeZone fija: el servidor (UTC) y el navegador deben pintar lo mismo.
@@ -112,7 +141,20 @@ export function PanelInventario({
   const [proveedorDialog, setProveedorDialog] = useState<Supplier | "nuevo" | null>(null);
   const [pedidoDialog, setPedidoDialog] = useState<SupplierOrderConDetalle | "nuevo" | null>(null);
 
-  const bajos = productos.filter((p) => p.activo && p.stock <= p.stock_minimo);
+  /* Búsqueda y filtro de tipo — viven aquí para poder pintarlos junto a las
+     pestañas (solo aplican a "Productos"). */
+  const [busqueda, setBusqueda] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("todos");
+
+  /* Filtro de semáforo de stock (solo aplica a la pestaña de productos). */
+  const [filtroStock, setFiltroStock] = useState("todos");
+
+  /* Agotado (ya no hay) y por acabarse (queda poco: lo accionable) son cosas
+     distintas; juntarlos ahogaba el aviso con cientos de variantes agotadas. */
+  const agotados = productos.filter((p) => estadoStock(p) === "agotado");
+  const porAcabarse = productos.filter((p) => estadoStock(p) === "por_acabarse");
+  const enCamino = pedidos.filter((p) => p.estado !== "recibido" && p.estado !== "cancelado");
+  const valorInventario = productos.reduce((acc, p) => acc + p.stock * (p.costo ?? 0), 0);
 
   function abrirNuevo() {
     if (pestana === "productos") setProductoDialog("nuevo");
@@ -120,27 +162,54 @@ export function PanelInventario({
     else setPedidoDialog("nuevo");
   }
 
+  /* Desde el aviso de stock bajo: llevar a Pedidos y abrir uno nuevo. */
+  function generarPedido() {
+    setPestana("pedidos");
+    setPedidoDialog("nuevo");
+  }
+
+  /* Desde el aviso o las tarjetas: ver la lista filtrada por semáforo. */
+  function verProductosPorStock(estado: string) {
+    setPestana("productos");
+    setFiltroStock(estado);
+  }
+
   return (
     <div>
-      {/* Barra superior */}
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      {/* Encabezado: título a la izquierda, acciones a la derecha */}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Inventario y proveedores</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h1 className="text-[26px] font-bold tracking-tight">Inventario y proveedores</h1>
+          <p className="mt-1.5 text-[14.5px] text-muted-foreground">
             Cuánto hay de cada producto, quién lo surte y qué viene en camino.
-            {tiendanube.conectada && tiendanube.ultimaSync && (
-              <span className="ml-1">· Tienda Nube: {fechaCorta(tiendanube.ultimaSync)}.</span>
-            )}
-            {mercadolibre.conectada && mercadolibre.ultimaSync && (
-              <span className="ml-1">· Mercado Libre: {fechaCorta(mercadolibre.ultimaSync)}.</span>
-            )}
           </p>
+          {(tiendanube.conectada || mercadolibre.conectada) && (
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {tiendanube.conectada && tiendanube.ultimaSync && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-green-500" />
+                  Tienda Nube sincronizada · {fechaCorta(tiendanube.ultimaSync)}
+                </span>
+              )}
+              {mercadolibre.conectada && mercadolibre.ultimaSync && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border bg-card px-2.5 py-1 text-xs text-muted-foreground">
+                  <span className="size-1.5 rounded-full bg-green-500" />
+                  Mercado Libre sincronizado · {fechaCorta(mercadolibre.ultimaSync)}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {tiendanube.conectada ? (
-            <Button variant="outline" onClick={sincronizar} disabled={sincronizando}>
-              <RefreshCw className={cn("size-4", sincronizando && "animate-spin")} aria-hidden="true" />
-              {sincronizando ? "Sincronizando…" : "Sincronizar Tienda Nube"}
+            <Button
+              variant="outline"
+              onClick={sincronizar}
+              disabled={sincronizando}
+              className="h-auto gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
+            >
+              <RefreshCw className={cn("size-[15px]", sincronizando && "animate-spin")} strokeWidth={1.9} aria-hidden="true" />
+              {sincronizando ? "Sincronizando…" : "Sincronizar"}
             </Button>
           ) : (
             <Button
@@ -148,15 +217,21 @@ export function PanelInventario({
               onClick={() => {
                 window.location.href = "/api/tiendanube/conectar";
               }}
+              className="h-auto gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
             >
-              <Store className="size-4" aria-hidden="true" />
+              <Store className="size-[15px]" strokeWidth={1.9} aria-hidden="true" />
               Conectar Tienda Nube
             </Button>
           )}
           {mercadolibre.conectada ? (
-            <Button variant="outline" onClick={sincronizarML} disabled={sincronizandoML}>
-              <RefreshCw className={cn("size-4", sincronizandoML && "animate-spin")} aria-hidden="true" />
-              {sincronizandoML ? "Sincronizando…" : "Sincronizar Mercado Libre"}
+            <Button
+              variant="outline"
+              onClick={sincronizarML}
+              disabled={sincronizandoML}
+              className="h-auto gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
+            >
+              <RefreshCw className={cn("size-[15px]", sincronizandoML && "animate-spin")} strokeWidth={1.9} aria-hidden="true" />
+              {sincronizandoML ? "Sincronizando…" : "Mercado Libre"}
             </Button>
           ) : (
             <Button
@@ -164,48 +239,158 @@ export function PanelInventario({
               onClick={() => {
                 window.location.href = "/api/mercadolibre/conectar";
               }}
+              className="h-auto gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
             >
-              <ShoppingCart className="size-4" aria-hidden="true" />
+              <ShoppingCart className="size-[15px]" strokeWidth={1.9} aria-hidden="true" />
               Conectar Mercado Libre
             </Button>
           )}
-          <div className="inline-flex rounded-lg bg-muted p-0.5">
-            {PESTANAS.map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setPestana(id)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
-                  pestana === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <Button onClick={abrirNuevo}>{ETIQUETA_NUEVO[pestana]}</Button>
+          <Button
+            onClick={abrirNuevo}
+            className="h-auto gap-1.5 rounded-[11px] px-[17px] py-2.5 text-[13.5px] font-semibold shadow-[0_6px_16px_-8px_rgba(232,67,147,0.7)]"
+          >
+            <Plus className="size-4" strokeWidth={2.1} />
+            {ETIQUETA_NUEVO[pestana]}
+          </Button>
         </div>
       </div>
 
-      {/* Aviso de stock bajo — visible al abrir el módulo, en cualquier pestaña. */}
-      {bajos.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setPestana("productos")}
-          className="mb-4 flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-sm font-semibold text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-        >
-          <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
-          {bajos.length === 1
-            ? `1 producto con stock bajo: ${bajos[0].nombre}`
-            : `${bajos.length} productos con stock bajo: ${bajos
-                .slice(0, 3)
-                .map((p) => p.nombre)
-                .join(", ")}${bajos.length > 3 ? "…" : ""}`}
-        </button>
+      {/* Tarjetas KPI */}
+      <div className="mb-4 grid grid-cols-2 gap-3.5 lg:grid-cols-5">
+        <StatCard etiqueta="SKUs" valor={String(productos.length)} icono={Boxes} />
+        <StatCard
+          etiqueta="Por acabarse"
+          valor={String(porAcabarse.length)}
+          icono={AlertTriangle}
+          valorClassName={porAcabarse.length > 0 ? "text-amber-600" : undefined}
+        />
+        <StatCard
+          etiqueta="Agotados"
+          valor={String(agotados.length)}
+          icono={PackageX}
+          valorClassName={agotados.length > 0 ? "text-red-600" : undefined}
+        />
+        <StatCard etiqueta="En camino" valor={String(enCamino.length)} icono={Truck} />
+        <StatCard etiqueta="Valor inventario" valor={valorCompacto(valorInventario)} icono={DollarSign} />
+      </div>
+
+      {/* Barra de herramientas: pestañas a la izquierda, búsqueda/filtro a la derecha */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-lg bg-muted p-0.5">
+          {PESTANAS.map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => setPestana(id)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
+                pestana === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {pestana === "productos" && (
+          <>
+            <div className="relative flex min-w-[260px] items-center">
+              <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" strokeWidth={1.9} />
+              <Input
+                placeholder="Buscar producto, variante o proveedor…"
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="h-auto rounded-[10px] bg-card py-2 pl-9"
+              />
+            </div>
+            <Select value={filtroTipo} onValueChange={(v) => setFiltroTipo(v ?? "todos")}>
+              <SelectTrigger className="w-[170px] bg-card">
+                <SelectValue>
+                  {(v: string) =>
+                    v === "todos" ? "Todos los tipos" : (obtenerTipoProducto(v)?.nombre ?? "Tipo")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los tipos</SelectItem>
+                {TIPOS_PRODUCTO.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filtroStock} onValueChange={(v) => setFiltroStock(v ?? "todos")}>
+              <SelectTrigger className="w-[165px] bg-card">
+                <SelectValue>
+                  {(v: string) =>
+                    v === "todos" ? "Todo el stock" : (obtenerEstadoStock(v)?.nombre ?? "Stock")}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todo el stock</SelectItem>
+                {ESTADOS_STOCK.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        )}
+      </div>
+
+      {/* Aviso: SOLO lo que está por acabarse (lo accionable). Lo agotado se
+          consulta con el filtro; en la tienda hay cientos y ahogaban el aviso. */}
+      {porAcabarse.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950">
+          <AlertTriangle className="size-[18px] shrink-0 text-amber-600 dark:text-amber-400" strokeWidth={1.9} aria-hidden="true" />
+          <button
+            type="button"
+            onClick={() => verProductosPorStock("por_acabarse")}
+            className="flex-1 text-left text-[13.5px] leading-relaxed text-amber-800 hover:underline dark:text-amber-300"
+          >
+            <b className="font-bold text-amber-700 dark:text-amber-300">
+              {porAcabarse.length === 1
+                ? "1 producto está por acabarse."
+                : `${porAcabarse.length} productos están por acabarse.`}
+            </b>{" "}
+            {porAcabarse
+              .slice(0, 3)
+              .map((p) => p.nombre)
+              .join(", ")}
+            {porAcabarse.length > 3 ? "…" : ""}
+          </button>
+          {agotados.length > 0 && (
+            <button
+              type="button"
+              onClick={() => verProductosPorStock("agotado")}
+              className="shrink-0 text-[12.5px] font-semibold text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
+            >
+              Ver {agotados.length} agotados
+            </button>
+          )}
+          {gestor && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={generarPedido}
+              className="h-auto shrink-0 rounded-[9px] border-amber-200 bg-card px-3 py-1.5 text-[12.5px] font-semibold text-amber-700 hover:bg-amber-100 dark:border-amber-800 dark:text-amber-300"
+            >
+              Generar pedido
+            </Button>
+          )}
+        </div>
       )}
 
       {pestana === "productos" && (
-        <TablaProductos productos={productos} onEditar={setProductoDialog} />
+        <TablaProductos
+          productos={productos}
+          busqueda={busqueda}
+          filtroTipo={filtroTipo}
+          filtroStock={filtroStock}
+          onEditar={setProductoDialog}
+        />
       )}
       {pestana === "proveedores" && (
         <TablaProveedores

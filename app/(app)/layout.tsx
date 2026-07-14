@@ -17,16 +17,26 @@ export default async function AppLayout({
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, nombre, rol, area, color")
-    .eq("id", user.id)
-    .single();
+  const [{ data: profile }, { count: tareasActivas }] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id, nombre, rol, area, color")
+      .eq("id", user.id)
+      .single(),
+    supabase
+      .from("tasks")
+      .select("id", { count: "exact", head: true })
+      .neq("estado", "hecho"),
+  ]);
 
   return (
     <div className="flex min-h-screen max-md:flex-col">
-      <Sidebar profile={profile as Profile | null} email={user.email ?? ""} />
-      <main className="flex-1 overflow-x-auto p-6 md:p-7">{children}</main>
+      <Sidebar
+        profile={profile as Profile | null}
+        email={user.email ?? ""}
+        tareasActivas={tareasActivas ?? 0}
+      />
+      <main className="flex-1 overflow-x-auto bg-[#f4f4f6] p-6 md:p-7">{children}</main>
     </div>
   );
 }

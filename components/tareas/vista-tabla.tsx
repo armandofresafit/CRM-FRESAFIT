@@ -78,10 +78,10 @@ export function VistaTabla({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
+    <div className="overflow-x-auto rounded-2xl border bg-card shadow-sm">
       <div className="min-w-[760px]">
         {/* Encabezado de columnas */}
-        <div className={cn("grid gap-2 border-b bg-muted/40 px-3 py-2 text-xs font-bold uppercase tracking-wide text-muted-foreground", COLS)}>
+        <div className={cn("grid gap-2 border-b bg-muted/40 px-6 py-3 text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground", COLS)}>
           <div>Tarea</div>
           <div>Responsable</div>
           <div>Estado</div>
@@ -97,16 +97,18 @@ export function VistaTabla({
               <button
                 type="button"
                 onClick={() => toggle(area.id)}
-                className="flex w-full items-center gap-2 border-b bg-card px-3 py-2 text-left hover:bg-muted/40"
+                className="flex w-full items-center gap-2.5 border-b bg-muted/20 px-6 py-2.5 text-left hover:bg-muted/40"
               >
                 {cerrado ? (
-                  <ChevronRight className="size-4 text-muted-foreground" />
+                  <ChevronRight className="size-3.5 text-muted-foreground" />
                 ) : (
-                  <ChevronDown className="size-4 text-muted-foreground" />
+                  <ChevronDown className="size-3.5 text-muted-foreground" />
                 )}
-                <span className="inline-block h-4 w-1.5 rounded" style={{ backgroundColor: area.color }} />
-                <span className="text-sm font-bold">{area.nombre}</span>
-                <span className="text-xs text-muted-foreground">· {items.length}</span>
+                <span className="inline-block size-2 rounded-[3px]" style={{ backgroundColor: area.color }} />
+                <span className="text-[13.5px] font-bold">{area.nombre}</span>
+                <span className="rounded-full bg-muted px-2 text-xs font-semibold text-muted-foreground">
+                  {items.length}
+                </span>
               </button>
 
               {!cerrado &&
@@ -116,7 +118,7 @@ export function VistaTabla({
                   return (
                     <div
                       key={t.id}
-                      className={cn("grid items-center gap-2 border-b px-3 py-2 text-sm hover:bg-muted/30", COLS)}
+                      className={cn("grid items-center gap-2 border-b px-6 py-3 text-sm last:border-b-0 hover:bg-accent/30", COLS)}
                     >
                       {/* Tarea */}
                       <button
