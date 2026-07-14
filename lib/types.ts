@@ -205,6 +205,31 @@ export type SaleConProducto = Sale & {
   producto: Pick<Product, "id" | "nombre" | "variante"> | null;
 };
 
+/* --- Módulo Clientes (Fase 4) --- */
+
+/* Cliente (tabla `customers`). Los de Tienda Nube se crean y actualizan solos
+   al importar las órdenes (tiendanube_customer_id != null). */
+export type Customer = {
+  id: string;
+  nombre: string;
+  telefono: string | null;
+  correo: string | null;
+  canal: CanalId | null; // canal de origen
+  notas: string | null;
+  tiendanube_customer_id: number | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+/* Cliente con sus números derivados de `sales` (no se guardan en la BD). */
+export type CustomerConStats = Customer & {
+  compras: number; // nº de ventas
+  total: number; // total gastado
+  ultimaCompra: string | null; // "AAAA-MM-DD"
+  recurrente: boolean; // 2 o más compras
+};
+
 /* --- Módulo Finanzas (Fase 3, solo dirección) --- */
 
 /* Gasto (tabla `expenses`). Los ingresos NO se capturan: salen de `sales`. */

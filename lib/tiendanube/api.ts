@@ -188,7 +188,12 @@ export type OrdenTN = {
   paid_at?: string | null;
   total: string;
   products: LineaOrdenTN[];
-  customer?: { id?: number; name?: string | null; email?: string | null } | null;
+  customer?: {
+    id?: number;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 };
 
 export async function obtenerOrdenTN(cx: ConexionTN, id: number): Promise<OrdenTN | null> {

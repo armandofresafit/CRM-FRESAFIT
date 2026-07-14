@@ -99,7 +99,7 @@ export const MODULOS = [
   { id: "inventario", nombre: "Inventario", icono: "🏷️", href: "/inventario", activo: true },
   { id: "metricas", nombre: "Métricas", icono: "📊", href: "/metricas", activo: true },
   { id: "finanzas", nombre: "Finanzas y gastos", icono: "💰", href: "/finanzas", activo: true, soloDireccion: true },
-  { id: "clientes", nombre: "Clientes y ventas", icono: "🧑", href: "/clientes", activo: false },
+  { id: "clientes", nombre: "Clientes y ventas", icono: "🧑", href: "/clientes", activo: true },
   { id: "pedidos", nombre: "Pedidos y envíos", icono: "📦", href: "/pedidos", activo: false },
 ] as const;
 

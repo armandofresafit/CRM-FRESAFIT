@@ -15,10 +15,11 @@ export type VentaInput = {
   descripcion: string; // para ventas de productos fuera del catálogo
   cantidad: number;
   monto: number;
+  cliente_id: string | null;
   notas: string;
 };
 
-const RUTAS_VENTAS = ["/metricas"];
+const RUTAS_VENTAS = ["/metricas", "/clientes"];
 
 function validarVenta(input: VentaInput): string | null {
   if (!input.fecha) return "Falta la fecha de la venta.";
@@ -45,6 +46,7 @@ export async function registrarVenta(input: VentaInput): Promise<Resultado> {
     descripcion: input.descripcion.trim() || null,
     cantidad: input.cantidad,
     monto: input.monto,
+    cliente_id: input.cliente_id,
     notas: input.notas.trim() || null,
     origen: "manual",
     created_by: user.id,
@@ -71,6 +73,7 @@ export async function editarVenta(id: string, input: VentaInput): Promise<Result
       descripcion: input.descripcion.trim() || null,
       cantidad: input.cantidad,
       monto: input.monto,
+      cliente_id: input.cliente_id,
       notas: input.notas.trim() || null,
     })
     .eq("id", id);
@@ -101,10 +104,11 @@ export async function importarVentasTiendanube(): Promise<
 
   try {
     const r = await importarVentasTN();
-    RUTAS_VENTAS.forEach((r) => revalidatePath(r));
+    RUTAS_VENTAS.forEach((ruta) => revalidatePath(ruta));
+    revalidatePath("/clientes");
     return {
       ok: true,
-      detalle: `Tienda Nube: ${r.insertadas} ventas nuevas de ${r.ordenes} órdenes revisadas${r.retiradas ? `; ${r.retiradas} retiradas por cancelación` : ""}.`,
+      detalle: `Tienda Nube: ${r.insertadas} ventas nuevas de ${r.ordenes} órdenes revisadas${r.clientes ? `; ${r.clientes} clientes al día` : ""}${r.retiradas ? `; ${r.retiradas} retiradas por cancelación` : ""}.`,
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falló la importación de ventas." };

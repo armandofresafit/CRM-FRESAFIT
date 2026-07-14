@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -29,7 +29,8 @@ import {
   borrarVenta,
   type VentaInput,
 } from "@/app/(app)/metricas/actions";
-import type { CanalId, Product, SaleConProducto } from "@/lib/types";
+import { crearClienteRapido } from "@/app/(app)/clientes/actions";
+import type { CanalId, Customer, Product, SaleConProducto } from "@/lib/types";
 
 function etiquetaProducto(p: Pick<Product, "nombre" | "variante">): string {
   return `${p.nombre}${p.variante ? ` · ${p.variante}` : ""}`;
@@ -45,11 +46,13 @@ function aNumero(texto: string): number {
 export function VentaDialog({
   venta,
   productos,
+  clientes,
   gestor,
   onClose,
 }: {
   venta: SaleConProducto | null; // null = alta
   productos: Pick<Product, "id" | "nombre" | "variante" | "sku" | "precio" | "activo">[];
+  clientes: Pick<Customer, "id" | "nombre" | "correo" | "telefono">[];
   gestor: boolean;
   onClose: () => void;
 }) {
@@ -63,6 +66,13 @@ export function VentaDialog({
   const [montoTocado, setMontoTocado] = useState(!!venta);
   const [notas, setNotas] = useState(venta?.notas ?? "");
   const [busqueda, setBusqueda] = useState("");
+
+  /* Cliente (opcional): buscador con alta rápida. `lista` permite mostrar al
+     recién creado sin recargar la página. */
+  const [lista, setLista] = useState(clientes);
+  const [clienteId, setClienteId] = useState<string | null>(venta?.cliente_id ?? null);
+  const [busquedaCliente, setBusquedaCliente] = useState("");
+  const [creandoCliente, setCreandoCliente] = useState(false);
 
   const seleccionado = productoId ? (productos.find((p) => p.id === productoId) ?? null) : null;
 
@@ -93,6 +103,42 @@ export function VentaDialog({
     recalcularMonto(p, cantidad, montoTocado);
   }
 
+  const clienteSel = clienteId ? (lista.find((c) => c.id === clienteId) ?? null) : null;
+
+  const clientesCoincidentes = useMemo(() => {
+    const q = busquedaCliente.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return lista
+      .filter(
+        (c) =>
+          c.nombre.toLowerCase().includes(q) ||
+          (c.correo ?? "").toLowerCase().includes(q) ||
+          (c.telefono ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [busquedaCliente, lista]);
+
+  async function altaRapidaCliente() {
+    const nombre = busquedaCliente.trim();
+    if (!nombre) return;
+    setCreandoCliente(true);
+    try {
+      const r = await crearClienteRapido(nombre, canal);
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      setLista((prev) => [...prev, r.cliente]);
+      setClienteId(r.cliente.id);
+      setBusquedaCliente("");
+      toast.success("Cliente creado.");
+    } catch {
+      toast.error("No se pudo crear el cliente.");
+    } finally {
+      setCreandoCliente(false);
+    }
+  }
+
   function guardar() {
     const input: VentaInput = {
       fecha,
@@ -101,6 +147,7 @@ export function VentaDialog({
       descripcion,
       cantidad: Math.max(1, Math.trunc(aNumero(cantidad))),
       monto: Math.round(aNumero(monto) * 100) / 100,
+      cliente_id: clienteId,
       notas,
     };
     startTransition(async () => {
@@ -257,6 +304,62 @@ export function VentaDialog({
                 }}
               />
             </div>
+          </div>
+
+          {/* Cliente (opcional): buscador + alta rápida con solo el nombre. */}
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="venta-cliente">Cliente (opcional)</Label>
+            {clienteSel ? (
+              <span className="inline-flex w-fit max-w-full items-center gap-1.5 rounded-full border border-primary bg-primary/10 px-3 py-1 text-sm font-medium">
+                <span className="truncate">{clienteSel.nombre}</span>
+                <button
+                  type="button"
+                  onClick={() => setClienteId(null)}
+                  aria-label="Quitar cliente"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            ) : (
+              <div className="relative">
+                <Input
+                  id="venta-cliente"
+                  placeholder="Busca por nombre, correo o teléfono…"
+                  value={busquedaCliente}
+                  onChange={(e) => setBusquedaCliente(e.target.value)}
+                />
+                {busquedaCliente.trim().length >= 2 && (
+                  <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border bg-popover shadow-md">
+                    {clientesCoincidentes.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setClienteId(c.id);
+                          setBusquedaCliente("");
+                        }}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-sm hover:bg-accent"
+                      >
+                        <span className="truncate">{c.nombre}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {c.correo ?? c.telefono ?? ""}
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={altaRapidaCliente}
+                      disabled={creandoCliente}
+                      className="flex w-full items-center gap-1.5 border-t px-3 py-1.5 text-left text-sm font-semibold text-primary hover:bg-accent disabled:opacity-60"
+                    >
+                      <Plus className="size-3.5" />
+                      {creandoCliente ? "Creando…" : `Crear «${busquedaCliente.trim()}»`}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">

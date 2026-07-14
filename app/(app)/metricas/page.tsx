@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { estadoTiendanube } from "@/lib/tiendanube/api";
 import { diasDesdeHoy } from "@/lib/fecha";
 import { PanelMetricas } from "@/components/metricas/panel";
-import type { Product, RolId, SaleConProducto } from "@/lib/types";
+import type { Customer, Product, RolId, SaleConProducto } from "@/lib/types";
 
 export const metadata = { title: "Métricas · Fresafit" };
 
@@ -16,7 +16,7 @@ export default async function MetricasPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [ventasRes, productosRes, perfilRes, tiendanube] = await Promise.all([
+  const [ventasRes, productosRes, clientesRes, perfilRes, tiendanube] = await Promise.all([
     supabase
       .from("sales")
       .select("*, producto:products!producto_id(id, nombre, variante)")
@@ -28,6 +28,7 @@ export default async function MetricasPage() {
       .from("products")
       .select("id, nombre, variante, sku, precio, activo")
       .order("nombre"),
+    supabase.from("customers").select("id, nombre, correo, telefono").order("nombre"),
     user
       ? supabase.from("profiles").select("rol").eq("id", user.id).single()
       : Promise.resolve({ data: null }),
@@ -39,7 +40,16 @@ export default async function MetricasPage() {
     Product,
     "id" | "nombre" | "variante" | "sku" | "precio" | "activo"
   >[];
+  const clientes = (clientesRes.data ?? []) as Pick<Customer, "id" | "nombre" | "correo" | "telefono">[];
   const rol = ((perfilRes.data as { rol?: RolId } | null)?.rol ?? "miembro") as RolId;
 
-  return <PanelMetricas ventas={ventas} productos={productos} rol={rol} tiendanube={tiendanube} />;
+  return (
+    <PanelMetricas
+      ventas={ventas}
+      productos={productos}
+      clientes={clientes}
+      rol={rol}
+      tiendanube={tiendanube}
+    />
+  );
 }
