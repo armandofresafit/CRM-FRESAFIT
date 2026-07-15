@@ -117,6 +117,17 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+/* Semillas de fresa flotando en el panel de marca del login. */
+@keyframes floatSeed {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(6deg);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
