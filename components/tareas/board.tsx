@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { AlertTriangle, Info, List, LayoutGrid, Calendar as CalendarIcon, Plus } from "lucide-react";
+import { AlertTriangle, ChevronDown, Info, List, LayoutGrid, Calendar as CalendarIcon, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ESTADOS, AREAS, ROLES, esGestor } from "@/lib/catalogos";
 import { esVencida } from "@/lib/fecha";
@@ -35,6 +35,7 @@ import { CargaPersonas } from "@/components/tareas/carga-personas";
 import { ExportButton } from "@/components/tareas/export-button";
 import { VistaTabla } from "@/components/tareas/vista-tabla";
 import { VistaCalendario } from "@/components/tareas/vista-calendario";
+import { VistaMovil } from "@/components/tareas/vista-movil";
 
 /* Alcance global: "mis" = solo lo asignado a mí; aplica en las TRES vistas. */
 type Alcance = "mis" | "todas";
@@ -75,6 +76,17 @@ export function Board({
   const [nuevaAbierta, setNuevaAbierta] = useState(false);
   const [detalle, setDetalle] = useState<TaskConResponsable | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  /* Tablero agrupado por área: los temas arrancan COLAPSADOS (guardamos las
+     áreas ABIERTAS; conjunto vacío = todo colapsado). */
+  const [areasAbiertas, setAreasAbiertas] = useState<Set<string>>(new Set());
+  function alternarArea(areaId: string) {
+    setAreasAbiertas((prev) => {
+      const next = new Set(prev);
+      next.has(areaId) ? next.delete(areaId) : next.add(areaId);
+      return next;
+    });
+  }
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -149,8 +161,26 @@ export function Board({
 
   return (
     <div>
+      {/* ===== MÓVIL: lista agrupada por área (diseño Claude Design) ===== */}
+      <div className="md:hidden">
+        <VistaMovil
+          tareas={tareas}
+          currentUserId={currentUserId}
+          gestor={gestor}
+          rol={rol}
+          alcance={alcance}
+          setAlcance={setAlcance}
+          soloVencidas={soloVencidas}
+          setSoloVencidas={setSoloVencidas}
+          onAbrir={setDetalle}
+          onNueva={() => setNuevaAbierta(true)}
+        />
+      </div>
+
+      {/* ===== ESCRITORIO: barra de herramientas + vistas tabla/tablero/calendario ===== */}
+      <div className="hidden md:block">
       {/* Encabezado: título a la izquierda, acciones principales a la derecha */}
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:flex-wrap md:items-start md:justify-between">
         <div>
           <h1 className="text-[26px] font-bold tracking-tight">Tareas del equipo</h1>
           <p className="mt-1.5 text-[14.5px] text-muted-foreground">
@@ -217,13 +247,14 @@ export function Board({
             <button
               key={id}
               onClick={() => setVistaTop(id)}
+              aria-label={label}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors",
                 vistaTop === id ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
               )}
             >
               <Icono className="size-3.5" strokeWidth={1.8} />
-              {label}
+              <span className="hidden sm:inline">{label}</span>
             </button>
           ))}
         </div>
@@ -234,7 +265,7 @@ export function Board({
         {alcance === "todas" && (
           <>
             <Select value={filtroResponsable} onValueChange={(v) => setFiltroResponsable(v ?? "todos")}>
-              <SelectTrigger className="w-[190px] bg-card">
+              <SelectTrigger className="w-full bg-card sm:w-[190px]">
                 <SelectValue>
                   {(value: string) =>
                     value === "todos"
@@ -306,16 +337,18 @@ export function Board({
                 No tienes tareas asignadas por ahora.
               </p>
             )}
-            <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {/* Móvil: carril horizontal con snap (columnas lado a lado). Escritorio: grid. */}
+            <div className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 md:mx-0 md:grid md:grid-cols-2 md:overflow-visible md:px-0 xl:grid-cols-4">
               {ESTADOS.map((estado) => (
-                <Column
-                  key={estado.id}
-                  estadoId={estado.id}
-                  nombre={estado.nombre}
-                  tareas={filtradas.filter((t) => t.estado === estado.id)}
-                  onMover={mover}
-                  onEditar={setDetalle}
-                />
+                <div key={estado.id} className="w-[85%] shrink-0 snap-start md:w-auto">
+                  <Column
+                    estadoId={estado.id}
+                    nombre={estado.nombre}
+                    tareas={filtradas.filter((t) => t.estado === estado.id)}
+                    onMover={mover}
+                    onEditar={setDetalle}
+                  />
+                </div>
               ))}
             </div>
           </>
@@ -325,39 +358,58 @@ export function Board({
           </p>
         ) : (
           <div className="flex flex-col gap-6">
-            {/* Encabezado de columnas (una vez, arriba) */}
-            <div className="hidden gap-4 xl:grid xl:grid-cols-4">
-              {ESTADOS.map((e) => (
-                <div key={e.id} className="px-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {e.nombre}
-                </div>
-              ))}
-            </div>
+            {/* Encabezado de columnas (una vez, arriba) — solo si hay algún tema abierto */}
+            {areasVisibles.some((a) => areasAbiertas.has(a.id)) && (
+              <div className="hidden gap-4 xl:grid xl:grid-cols-4">
+                {ESTADOS.map((e) => (
+                  <div key={e.id} className="px-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    {e.nombre}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {areasVisibles.map((area) => {
               const delArea = filtradas.filter((t) => t.area === area.id);
+              const abierta = areasAbiertas.has(area.id);
               return (
                 <div key={area.id}>
-                  <div className="mb-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => alternarArea(area.id)}
+                    aria-expanded={abierta}
+                    className="mb-2 flex w-full items-center gap-2"
+                  >
                     <span className="inline-block h-4 w-1.5 rounded" style={{ backgroundColor: area.color }} />
                     <span className="text-sm font-bold">{area.nombre}</span>
                     <span className="text-xs text-muted-foreground">
                       {delArea.length} {delArea.length === 1 ? "tarea" : "tareas"}
                     </span>
-                  </div>
-                  <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    <ChevronDown
+                      className={cn(
+                        "size-4 text-muted-foreground transition-transform",
+                        !abierta && "-rotate-90",
+                      )}
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    />
+                  </button>
+                  {abierta && (
+                  <div className="-mx-4 flex snap-x snap-mandatory items-start gap-4 overflow-x-auto px-4 md:mx-0 md:grid md:grid-cols-2 md:overflow-visible md:px-0 xl:grid-cols-4">
                     {ESTADOS.map((estado) => (
-                      <Column
-                        key={estado.id}
-                        estadoId={estado.id}
-                        droppableId={`${area.id}::${estado.id}`}
-                        nombre={estado.nombre}
-                        tareas={delArea.filter((t) => t.estado === estado.id)}
-                        onMover={mover}
-                        onEditar={setDetalle}
-                      />
+                      <div key={estado.id} className="w-[85%] shrink-0 snap-start md:w-auto">
+                        <Column
+                          estadoId={estado.id}
+                          droppableId={`${area.id}::${estado.id}`}
+                          nombre={estado.nombre}
+                          tareas={delArea.filter((t) => t.estado === estado.id)}
+                          onMover={mover}
+                          onEditar={setDetalle}
+                        />
+                      </div>
                     ))}
                   </div>
+                  )}
                 </div>
               );
             })}
@@ -367,6 +419,7 @@ export function Board({
         <DragOverlay>{activa ? <TaskCard tarea={activa} overlay /> : null}</DragOverlay>
       </DndContext>
       )}
+      </div>
 
       {nuevaAbierta && (
         <TaskDialog
