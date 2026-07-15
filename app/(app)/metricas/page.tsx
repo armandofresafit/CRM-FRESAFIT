@@ -21,6 +21,7 @@ export default async function MetricasPage() {
       .from("sales")
       .select("*, producto:products!producto_id(id, nombre, variante)")
       .gte("fecha", diasDesdeHoy(-DIAS_VENTANA))
+      .or("estado.is.null,estado.neq.cancelado") // los cancelados no cuentan como venta
       .order("fecha", { ascending: false })
       .order("created_at", { ascending: false })
       .limit(5000),

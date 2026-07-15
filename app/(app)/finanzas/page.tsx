@@ -34,7 +34,12 @@ export default async function FinanzasPage() {
       .order("fecha", { ascending: false })
       .order("created_at", { ascending: false }),
     /* Entradas = ventas (Fase 2). No hay tabla de ingresos: se derivan. */
-    supabase.from("sales").select("fecha, monto").gte("fecha", desde).limit(5000),
+    supabase
+      .from("sales")
+      .select("fecha, monto")
+      .gte("fecha", desde)
+      .or("estado.is.null,estado.neq.cancelado") // los cancelados no son ingreso
+      .limit(5000),
   ]);
 
   const gastos = (gastosRes.data ?? []) as unknown as ExpenseConComprobantes[];

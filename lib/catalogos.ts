@@ -73,6 +73,21 @@ export const ESTADOS_PEDIDO_PROVEEDOR = [
   { id: "cancelado", nombre: "Cancelado", color: "#d63031" },
 ] as const;
 
+/* --- Estados de un pedido/envío (Fase 5). El orden = avance del flujo. --- */
+export const ESTADOS_PEDIDO = [
+  { id: "nuevo", nombre: "Nuevo", color: "#0984e3" },
+  { id: "preparando", nombre: "Preparando", color: "#f59e0b" },
+  { id: "enviado", nombre: "Enviado", color: "#6c5ce7" },
+  { id: "entregado", nombre: "Entregado", color: "#22c55e" },
+  { id: "cancelado", nombre: "Cancelado", color: "#d63031" },
+] as const;
+
+/* Los estados que cuentan como "pendiente" (aún dan trabajo). */
+export const ESTADOS_PEDIDO_PENDIENTES = ["nuevo", "preparando", "enviado"] as const;
+
+/* Paqueterías sugeridas (datalist; no es un catálogo cerrado). */
+export const PAQUETERIAS = ["Estafeta", "DHL", "FedEx", "Paquetexpress", "J&T", "99minutos", "Correos de México"] as const;
+
 /* --- Canales de venta (Fase 2: se reutilizan en Finanzas, Clientes y Pedidos). --- */
 export const CANALES = [
   { id: "tienda_nube", nombre: "Tienda Nube", color: "#0984e3" },
@@ -100,7 +115,7 @@ export const MODULOS = [
   { id: "metricas", nombre: "Métricas", icono: "📊", href: "/metricas", activo: true },
   { id: "finanzas", nombre: "Finanzas y gastos", icono: "💰", href: "/finanzas", activo: true, soloDireccion: true },
   { id: "clientes", nombre: "Clientes y ventas", icono: "🧑", href: "/clientes", activo: true },
-  { id: "pedidos", nombre: "Pedidos y envíos", icono: "📦", href: "/pedidos", activo: false },
+  { id: "pedidos", nombre: "Pedidos y envíos", icono: "📦", href: "/pedidos", activo: true },
 ] as const;
 
 /* --- Referencia para sembrar los perfiles iniciales del equipo (scripts/seed.mjs).
@@ -150,6 +165,9 @@ export function obtenerCanal(id: string) {
 }
 export function obtenerCategoriaGasto(id: string) {
   return CATEGORIAS_GASTO.find((c) => c.id === id) ?? null;
+}
+export function obtenerEstadoPedido(id: string) {
+  return ESTADOS_PEDIDO.find((e) => e.id === id) ?? null;
 }
 
 /* --- Ayudantes de rol --- */

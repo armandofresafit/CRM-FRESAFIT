@@ -45,6 +45,20 @@ function correoDe(orden: OrdenTN): string | null {
   return c || null;
 }
 
+/* shipping_status de Tienda Nube → estado de pedido del CRM. */
+function estadoDeEnvio(orden: OrdenTN): "nuevo" | "preparando" | "enviado" | "entregado" {
+  switch (orden.shipping_status) {
+    case "delivered":
+      return "entregado";
+    case "shipped":
+      return "enviado";
+    case "unshipped": // empacado, en espera de recolección
+      return "preparando";
+    default: // unpacked / null → recién llegado
+      return "nuevo";
+  }
+}
+
 /* Renglones de `sales` de una orden (la orden ya debe ser vendible). */
 function filasDeOrden(
   orden: OrdenTN,
@@ -55,6 +69,9 @@ function filasDeOrden(
   const cliente = orden.contact_name?.trim();
   const correo = correoDe(orden);
   const clienteId = correo ? (clientePorCorreo.get(correo) ?? null) : null;
+  const estado = estadoDeEnvio(orden);
+  const paqueteria = orden.shipping_carrier_name?.trim() || null;
+  const numGuia = orden.shipping_tracking_number?.trim() || null;
   return (orden.products ?? []).map((linea) => {
     const cantidad = Math.max(1, Math.trunc(Number(linea.quantity) || 1));
     const unitario = Number(linea.price) || 0;
@@ -66,6 +83,9 @@ function filasDeOrden(
       cantidad,
       monto: Math.round(unitario * cantidad * 100) / 100,
       cliente_id: clienteId,
+      estado,
+      paqueteria,
+      num_guia: numGuia,
       origen: "api",
       referencia_externa: `${orden.id}:${linea.variant_id}`,
       notas: `Orden TN #${orden.number}${cliente ? ` — ${cliente}` : ""}`,
@@ -160,6 +180,25 @@ async function aplicarOrdenes(ordenes: OrdenTN[]): Promise<ResumenVentasTN> {
         .update({ cliente_id: clienteId })
         .eq("canal", "tienda_nube")
         .is("cliente_id", null)
+        .in("referencia_externa", refs);
+    }
+
+    /* Estado/guía de envío: Tienda Nube es la fuente de verdad del fulfillment
+       de los pedidos online, así que se refresca SIEMPRE en cada sync (no solo
+       al crear). Agrupado por estado para hacer pocos UPDATE. El estado de las
+       ventas manuales / de mostrador lo maneja el equipo y no se toca aquí. */
+    const porEstado = new Map<string, string[]>();
+    for (const f of filas) {
+      const lista = porEstado.get(f.estado) ?? [];
+      lista.push(f.referencia_externa);
+      porEstado.set(f.estado, lista);
+    }
+    for (const [estado, refs] of porEstado) {
+      await admin
+        .from("sales")
+        .update({ estado })
+        .eq("canal", "tienda_nube")
+        .eq("origen", "api")
         .in("referencia_externa", refs);
     }
   }

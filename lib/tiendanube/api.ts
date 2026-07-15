@@ -193,6 +193,10 @@ export type OrdenTN = {
   contact_name?: string | null;
   contact_email?: string | null;
   contact_phone?: string | null;
+  /* Estado de preparación/envío: unpacked | unshipped | shipped | delivered. */
+  shipping_status?: string | null;
+  shipping_tracking_number?: string | null;
+  shipping_carrier_name?: string | null;
 };
 
 export async function obtenerOrdenTN(cx: ConexionTN, id: number): Promise<OrdenTN | null> {

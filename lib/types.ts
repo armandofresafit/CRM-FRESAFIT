@@ -10,6 +10,7 @@ import type {
   ETIQUETAS,
   TIPOS_PRODUCTO,
   ESTADOS_PEDIDO_PROVEEDOR,
+  ESTADOS_PEDIDO,
   CANALES,
   CATEGORIAS_GASTO,
 } from "@/lib/catalogos";
@@ -24,6 +25,7 @@ export type TipoProductoId = (typeof TIPOS_PRODUCTO)[number]["id"];
 export type EstadoPedidoProvId = (typeof ESTADOS_PEDIDO_PROVEEDOR)[number]["id"];
 export type CanalId = (typeof CANALES)[number]["id"];
 export type CategoriaGastoId = (typeof CATEGORIAS_GASTO)[number]["id"];
+export type EstadoPedidoId = (typeof ESTADOS_PEDIDO)[number]["id"];
 
 /* Perfil de usuario (tabla `profiles`, 1:1 con auth.users). */
 export type Profile = {
@@ -196,6 +198,10 @@ export type Sale = {
   origen: "manual" | "csv" | "api";
   referencia_externa: string | null;
   notas: string | null;
+  /* Envío (Fase 5). null = venta directa sin flujo de envío. */
+  estado: EstadoPedidoId | null;
+  paqueteria: string | null;
+  num_guia: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string | null;
@@ -203,6 +209,11 @@ export type Sale = {
 
 export type SaleConProducto = Sale & {
   producto: Pick<Product, "id" | "nombre" | "variante"> | null;
+};
+
+/* Pedido = venta con su cliente resuelto (para la vista de Pedidos y envíos). */
+export type SaleConDetalle = SaleConProducto & {
+  cliente: Pick<Customer, "id" | "nombre"> | null;
 };
 
 /* --- Módulo Clientes (Fase 4) --- */

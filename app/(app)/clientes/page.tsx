@@ -19,6 +19,7 @@ export default async function ClientesPage() {
       .from("sales")
       .select("*, producto:products!producto_id(id, nombre, variante)")
       .not("cliente_id", "is", null)
+      .or("estado.is.null,estado.neq.cancelado") // los cancelados no cuentan
       .order("fecha", { ascending: false })
       .limit(10000),
     user

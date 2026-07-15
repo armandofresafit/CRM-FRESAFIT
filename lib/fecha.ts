@@ -34,6 +34,15 @@ export function esVencida(fechaLimite: string | null, estado: string): boolean {
   return fechaLimite < hoyISO() && estado !== "hecho";
 }
 
+/* Un pedido pendiente lleva demasiados días sin moverse a "entregado". */
+export const DIAS_ATRASO_PEDIDO = 3;
+
+/* ¿El pedido está atrasado? (pendiente y su fecha es de hace más de N días). */
+export function esPedidoAtrasado(fecha: string, estado: string | null): boolean {
+  if (estado === "entregado" || estado === "cancelado" || !estado) return false;
+  return fecha < diasDesdeHoy(-DIAS_ATRASO_PEDIDO);
+}
+
 /* ---- Helpers de PERIODOS (módulo Métricas; todo en fecha LOCAL) ---- */
 
 /* AAAA-MM-DD de una fecha local. */
