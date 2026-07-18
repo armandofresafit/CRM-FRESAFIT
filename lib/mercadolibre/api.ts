@@ -314,6 +314,20 @@ export type OrdenML = {
   total_amount?: number;
   order_items: LineaOrdenML[];
   buyer?: CompradorML | null;
+  // La orden trae el id del envío (el estado vive en /shipments/{id}) y tags de
+  // alto nivel ("delivered" / "not_delivered") que evitan consultar los ya
+  // entregados.
+  shipping?: { id?: number | null } | null;
+  tags?: string[] | null;
+};
+
+export type EnvioML = {
+  // pending | handling | ready_to_ship | shipped | delivered | not_delivered |
+  // cancelled | to_be_agreed | …
+  status?: string | null;
+  substatus?: string | null;
+  tracking_number?: string | null;
+  tracking_method?: string | null; // nombre de la paquetería / servicio
 };
 
 export async function obtenerOrdenML(cx: ConexionML, id: number | string): Promise<OrdenML | null> {
@@ -321,6 +335,19 @@ export async function obtenerOrdenML(cx: ConexionML, id: number | string): Promi
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Mercado Libre respondió ${res.status} al pedir la orden ${id}.`);
   return (await res.json()) as OrdenML;
+}
+
+/* Estado de un envío. Devuelve null (sin lanzar) ante cualquier fallo: el
+   estado del pedido es un enriquecimiento y jamás debe tumbar la importación
+   de la venta. */
+export async function obtenerEnvioML(cx: ConexionML, shipmentId: number | string): Promise<EnvioML | null> {
+  try {
+    const res = await mlFetch(cx, `/shipments/${shipmentId}`);
+    if (!res.ok) return null;
+    return (await res.json()) as EnvioML;
+  } catch {
+    return null;
+  }
 }
 
 /* Órdenes del seller desde una fecha (ISO), paginadas. Incluye canceladas: el

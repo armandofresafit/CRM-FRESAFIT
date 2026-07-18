@@ -17,8 +17,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   conexionMercadolibre,
   listarOrdenesML,
+  obtenerEnvioML,
   obtenerOrdenML,
   type ConexionML,
+  type EnvioML,
   type OrdenML,
 } from "@/lib/mercadolibre/api";
 
@@ -64,15 +66,69 @@ function nombreComprador(o: OrdenML): string | null {
   return nombre || b.nickname?.trim() || null;
 }
 
+type EstadoPedido = "nuevo" | "preparando" | "enviado" | "entregado";
+type InfoEnvio = { estado: EstadoPedido; paqueteria: string | null; num_guia: string | null };
+
+/* status de un envío de Mercado Libre → estado de pedido del CRM (mismo espíritu
+   que el shipping_status de Tienda Nube). */
+function estadoDeEnvio(env: EnvioML | null): EstadoPedido {
+  switch (env?.status) {
+    case "delivered":
+      return "entregado";
+    case "shipped":
+    case "not_delivered": // en tránsito / con incidencia de entrega
+      return "enviado";
+    case "ready_to_ship": // empacado, esperando recolección
+      return "preparando";
+    default: // pending / handling / to_be_agreed / cancelled / sin envío
+      return "nuevo";
+  }
+}
+
+/* Resuelve el estado de envío de un lote de órdenes. Las que los `tags` marcan
+   como entregadas no consultan el envío (ahorra llamadas en el histórico); las
+   demás piden /shipments/{id} con concurrencia acotada. Nunca lanza: sin dato,
+   el pedido queda "nuevo". */
+async function infoEnvioDeOrdenes(cx: ConexionML, ordenes: OrdenML[]): Promise<Map<number, InfoEnvio>> {
+  const info = new Map<number, InfoEnvio>();
+  const porConsultar: OrdenML[] = [];
+  for (const o of ordenes) {
+    if (o.tags?.includes("delivered")) {
+      info.set(o.id, { estado: "entregado", paqueteria: null, num_guia: null });
+    } else if (o.shipping?.id) {
+      porConsultar.push(o);
+    } else {
+      info.set(o.id, { estado: "nuevo", paqueteria: null, num_guia: null });
+    }
+  }
+
+  const CONCURRENCIA = 8;
+  for (let i = 0; i < porConsultar.length; i += CONCURRENCIA) {
+    await Promise.all(
+      porConsultar.slice(i, i + CONCURRENCIA).map(async (o) => {
+        const env = await obtenerEnvioML(cx, o.shipping!.id!);
+        info.set(o.id, {
+          estado: estadoDeEnvio(env),
+          paqueteria: env?.tracking_method?.trim() || null,
+          num_guia: env?.tracking_number?.trim() || null,
+        });
+      }),
+    );
+  }
+  return info;
+}
+
 /* Renglones de `sales` de una orden (la orden ya debe ser vendible). */
 function filasDeOrden(
   orden: OrdenML,
   productoPorUnidad: Map<string, string>,
   clientePorBuyer: Map<number, string>,
+  infoEnvio: Map<number, InfoEnvio>,
 ) {
   const fecha = (orden.date_closed ?? orden.date_created).slice(0, 10);
   const cliente = nombreComprador(orden);
   const clienteId = orden.buyer ? (clientePorBuyer.get(orden.buyer.id) ?? null) : null;
+  const envio = infoEnvio.get(orden.id) ?? { estado: "nuevo" as EstadoPedido, paqueteria: null, num_guia: null };
   return (orden.order_items ?? []).map((linea) => {
     const cantidad = Math.max(1, Math.trunc(Number(linea.quantity) || 1));
     const unitario = Number(linea.unit_price) || 0;
@@ -85,6 +141,9 @@ function filasDeOrden(
       cantidad,
       monto: Math.round(unitario * cantidad * 100) / 100,
       cliente_id: clienteId,
+      estado: envio.estado,
+      paqueteria: envio.paqueteria,
+      num_guia: envio.num_guia,
       origen: "api",
       referencia_externa: refLinea(orden.id, linea.item.id, variationId),
       notas: `Orden ML #${orden.id}${cliente ? ` — ${cliente}` : ""}`,
@@ -144,7 +203,7 @@ async function sincronizarClientes(ordenes: OrdenML[]): Promise<Map<number, stri
 
 /* Inserta los renglones nuevos (ignora los ya importados) y retira los de
    órdenes canceladas. Núcleo compartido por el cron y el webhook. */
-async function aplicarOrdenes(ordenes: OrdenML[]): Promise<ResumenVentasML> {
+async function aplicarOrdenes(cx: ConexionML, ordenes: OrdenML[]): Promise<ResumenVentasML> {
   const admin = createAdminClient();
   const vendibles = ordenes.filter(esVendible);
 
@@ -158,7 +217,8 @@ async function aplicarOrdenes(ordenes: OrdenML[]): Promise<ResumenVentasML> {
     console.error("[mercadolibre] sync de clientes:", e);
   }
 
-  const filas = vendibles.flatMap((o) => filasDeOrden(o, unidades, clientes));
+  const infoEnvio = await infoEnvioDeOrdenes(cx, vendibles);
+  const filas = vendibles.flatMap((o) => filasDeOrden(o, unidades, clientes, infoEnvio));
   let insertadas = 0;
   if (filas.length > 0) {
     const { data, error } = await admin
@@ -184,6 +244,26 @@ async function aplicarOrdenes(ordenes: OrdenML[]): Promise<ResumenVentasML> {
         .update({ cliente_id: clienteId })
         .eq("canal", "mercado_libre")
         .is("cliente_id", null)
+        .in("referencia_externa", refs);
+    }
+
+    /* Estado/guía de envío: Mercado Libre es la fuente de verdad del
+       fulfillment, así que se refresca SIEMPRE en cada sync (el upsert ignora
+       las filas ya existentes, por eso este UPDATE es lo que hace que un pedido
+       avance de nuevo→preparando→enviado→entregado). Agrupado por estado para
+       hacer pocos UPDATE; `origen=api` no toca ventas manuales/de mostrador. */
+    const porEstado = new Map<string, string[]>();
+    for (const f of filas) {
+      const lista = porEstado.get(f.estado) ?? [];
+      lista.push(f.referencia_externa);
+      porEstado.set(f.estado, lista);
+    }
+    for (const [estado, refs] of porEstado) {
+      await admin
+        .from("sales")
+        .update({ estado })
+        .eq("canal", "mercado_libre")
+        .eq("origen", "api")
         .in("referencia_externa", refs);
     }
   }
@@ -233,7 +313,7 @@ export async function importarVentasML(
   desde.setDate(desde.getDate() - (ultimaSync ? DIAS_TRASLAPE : DIAS_PRIMERA_VEZ));
 
   const ordenes = await listarOrdenesML(cx, desde.toISOString());
-  const resumen = await aplicarOrdenes(ordenes);
+  const resumen = await aplicarOrdenes(cx, ordenes);
 
   await admin
     .from("integraciones")
@@ -249,5 +329,5 @@ export async function procesarOrdenML(orderId: number | string): Promise<void> {
   if (!cx) return;
   const orden = await obtenerOrdenML(cx, orderId);
   if (!orden) return;
-  await aplicarOrdenes([orden]);
+  await aplicarOrdenes(cx, [orden]);
 }
