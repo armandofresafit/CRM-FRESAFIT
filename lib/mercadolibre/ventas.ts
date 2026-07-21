@@ -153,17 +153,29 @@ function filasDeOrden(
   });
 }
 
-/* Mapa unidad de Mercado Libre → id de producto del CRM. */
+/* Mapa unidad de Mercado Libre → id de producto del CRM.
+
+   Se lee de `meli_publicaciones` y no de `products` porque una misma ficha puede
+   tener VARIAS publicaciones sobre el mismo inventario: cuando ML suma un
+   artículo a su catálogo crea una publicación gemela, y la venta puede entrar
+   por cualquiera de las dos. `products` solo conoce la principal. */
 async function mapaUnidades(): Promise<Map<string, string>> {
   const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("products")
-    .select("id, meli_item_id, meli_variation_id")
-    .not("meli_item_id", "is", null);
-  if (error) throw new Error(error.message);
   const m = new Map<string, string>();
-  for (const p of data ?? []) {
-    m.set(claveUnidad(p.meli_item_id as string, (p.meli_variation_id as number | null) ?? null), p.id as string);
+  const TAM = 1000;
+  for (let desde = 0; ; desde += TAM) {
+    const { data, error } = await admin
+      .from("meli_publicaciones")
+      .select("meli_item_id, meli_variation_id, producto_id")
+      .range(desde, desde + TAM - 1);
+    if (error) throw new Error(error.message);
+    for (const p of data ?? []) {
+      m.set(
+        claveUnidad(p.meli_item_id as string, (p.meli_variation_id as number | null) ?? null),
+        p.producto_id as string,
+      );
+    }
+    if ((data ?? []).length < TAM) break;
   }
   return m;
 }

@@ -14,6 +14,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { conexionTiendanube, listarProductosTN } from "@/lib/tiendanube/api";
 import { conexionMercadolibre, listarItemsML } from "@/lib/mercadolibre/api";
 import { clave, unidadesDe } from "@/lib/mercadolibre/sync";
+import { detectarDuplicadosML, type GrupoDuplicado } from "@/lib/inventario/duplicados-ml";
+import { esFull } from "@/lib/inventario/reabastecimiento";
 
 export type Descuadre = {
   id: string;
@@ -30,13 +32,6 @@ export type Descuadre = {
   falta_en_ml: boolean;
 };
 
-export type ResumenReconciliacion = {
-  revisados: number; // productos vinculados a algún canal que se compararon
-  descuadres: Descuadre[];
-  tnConectada: boolean;
-  mlConectada: boolean;
-};
-
 type FilaCRM = {
   id: string;
   nombre: string;
@@ -46,6 +41,17 @@ type FilaCRM = {
   tiendanube_variant_id: number | null;
   meli_item_id: string | null;
   meli_variation_id: number | null;
+  meli_logistic_type: string | null;
+};
+
+export type ResumenReconciliacion = {
+  revisados: number; // productos vinculados a algún canal que se compararon
+  descuadres: Descuadre[];
+  /* Fichas distintas del CRM que en realidad son el mismo artículo en ML
+     (publicación original + gemela de catálogo, misma bodega). */
+  duplicados: GrupoDuplicado[];
+  tnConectada: boolean;
+  mlConectada: boolean;
 };
 
 export async function reconciliarInventario(): Promise<ResumenReconciliacion> {
@@ -59,7 +65,9 @@ export async function reconciliarInventario(): Promise<ResumenReconciliacion> {
   // Catálogo del CRM: solo productos activos y vinculados a algún canal.
   const { data, error } = await admin
     .from("products")
-    .select("id, nombre, variante, sku, stock, tiendanube_variant_id, meli_item_id, meli_variation_id")
+    .select(
+      "id, nombre, variante, sku, stock, tiendanube_variant_id, meli_item_id, meli_variation_id, meli_logistic_type",
+    )
     .eq("activo", true)
     .or("tiendanube_variant_id.not.is.null,meli_item_id.not.is.null")
     .order("nombre");
@@ -73,11 +81,15 @@ export async function reconciliarInventario(): Promise<ResumenReconciliacion> {
   ]);
 
   /* Tienda Nube: variante → stock. `stock` null en TN significa "sin control de
-     stock" para esa variante: no es un descuadre, así que se omite del mapa. */
+     stock" (combos, bundles y personalizados, que se arman bajo pedido): no
+     tiene inventario que comparar, pero SÍ existe en el canal. Por eso se
+     registra aparte de `stockTN`, para no confundirlo con "ya no está". */
   const stockTN = new Map<number, number>();
+  const sinControlTN = new Set<number>();
   for (const p of productosTN ?? []) {
     for (const v of p.variants) {
       if (typeof v.stock === "number") stockTN.set(v.id, Math.max(0, v.stock));
+      else sinControlTN.add(v.id);
     }
   }
 
@@ -90,14 +102,20 @@ export async function reconciliarInventario(): Promise<ResumenReconciliacion> {
   const descuadres: Descuadre[] = [];
   for (const f of filas) {
     const enTN = f.tiendanube_variant_id != null;
-    const enML = f.meli_item_id != null;
+    /* Mercado Full: la mercancía está depositada en un centro de ML, no en la
+       bodega. Su stock es de OTRO almacén, así que compararlo contra el del CRM
+       (que refleja la bodega) marca un descuadre que no existe. Se omite. */
+    const enML = f.meli_item_id != null && !esFull(f);
 
     // Solo se compara contra los canales conectados (si un canal no está
     // conectado no podemos afirmar nada de él).
     const tnVal = enTN && productosTN ? (stockTN.get(f.tiendanube_variant_id!) ?? null) : null;
     const mlVal = enML && itemsML ? (stockML.get(clave(f.meli_item_id!, f.meli_variation_id)) ?? null) : null;
 
-    const faltaEnTN = enTN && productosTN != null && tnVal === null;
+    /* "Ya no está en el canal" ≠ "no lleva control de stock": lo segundo es
+       normal en combos y personalizados y no es un descuadre. */
+    const faltaEnTN =
+      enTN && productosTN != null && tnVal === null && !sinControlTN.has(f.tiendanube_variant_id!);
     const faltaEnML = enML && itemsML != null && mlVal === null;
 
     const difiereTN = tnVal !== null && tnVal !== f.stock;
@@ -121,6 +139,8 @@ export async function reconciliarInventario(): Promise<ResumenReconciliacion> {
   return {
     revisados: filas.length,
     descuadres,
+    // Aprovecha el catálogo de ML que ya se leyó arriba: no cuesta otra pasada.
+    duplicados: await detectarDuplicadosML(itemsML),
     tnConectada: !!cxTN,
     mlConectada: !!cxML,
   };
