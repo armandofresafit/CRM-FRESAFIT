@@ -1,14 +1,22 @@
 /* ============================================================================
-   lib/inventario/duplicados-ml.ts — Fichas que son el mismo artículo en ML
+   lib/inventario/duplicados-ml.ts — Fichas que son el mismo artículo
    ----------------------------------------------------------------------------
-   Mercado Libre puede tener varias publicaciones sobre el MISMO inventario: al
-   sumar un artículo a su catálogo crea una publicación gemela que comparte
-   bodega con la original (ML las agrupa con `user_product_id`). El CRM las
-   importó como fichas separadas, así que el mismo artículo se cuenta dos veces
-   y las ventas se reparten entre las dos.
+   Dos formas distintas de terminar con la misma pieza en dos fichas:
 
-   Aquí se DETECTAN esos grupos (solo lectura). Unirlos es una acción explícita
-   del panel de Reconciliación: fusionarProductosML → RPC fusionar_producto_ml.
+   1. BODEGA COMPARTIDA EN ML (`user_product_id`). Al sumar un artículo a su
+      catálogo, Mercado Libre crea una publicación gemela que comparte bodega
+      con la original. El CRM las importó como fichas separadas.
+
+   2. MISMO SKU EN DOS CANALES. Una publicación de ML entró sin SKU (o con el de
+      otra herramienta) y se le abrió ficha propia; cuando después le cargan el
+      SKU correcto, esa ficha y la de Tienda Nube pasan a ser el mismo producto.
+      La sync no las une sola: el emparejamiento por SKU solo corre para
+      publicaciones que aún NO tienen ficha, y ésta ya tiene la suya.
+
+   En ambos casos, mientras estén separadas el inventario se cuenta doble y las
+   ventas se reparten. Aquí se DETECTAN (solo lectura). Unirlas es una acción
+   explícita del panel de Reconciliación: fusionarProductosML → RPC
+   fusionar_producto_ml.
    ============================================================================ */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -26,9 +34,16 @@ export type FichaDuplicada = {
   ventas: number;
 };
 
+/* Por qué el CRM cree que estas fichas son la misma pieza. */
+export type MotivoDuplicado = "bodega_ml" | "sku";
+
 export type GrupoDuplicado = {
-  /* Artículo del vendedor en ML ("MLMU…"): la bodega que comparten. */
-  user_product_id: string;
+  /* Identidad del grupo: el artículo de ML ("MLMU…") o "sku:XXX". */
+  clave: string;
+  motivo: MotivoDuplicado;
+  /* Artículo del vendedor en ML ("MLMU…"): la bodega que comparten. Solo en los
+     grupos por bodega. */
+  user_product_id: string | null;
   /* Lo que ML reporta para esa bodega (las publicaciones siempre coinciden). */
   stock_ml: number | null;
   fichas: FichaDuplicada[];
@@ -78,21 +93,7 @@ export async function detectarDuplicadosML(itemsML: ItemML[] | null): Promise<Gr
     for (const f of (data ?? []) as FilaCRM[]) filas.set(f.meli_item_id!, f);
   }
 
-  // Ventas por ficha: es el historial que la fusión va a mover, así que se
-  // muestra para que quien decide sepa qué está en juego.
-  const idsFichas = [...new Set([...filas.values()].map((f) => f.id))];
-  const ventas = new Map<string, number>();
-  for (let i = 0; i < idsFichas.length; i += 100) {
-    const { data, error } = await admin
-      .from("sales")
-      .select("producto_id")
-      .in("producto_id", idsFichas.slice(i, i + 100));
-    if (error) throw new Error(error.message);
-    for (const v of data ?? []) {
-      const id = v.producto_id as string;
-      ventas.set(id, (ventas.get(id) ?? 0) + 1);
-    }
-  }
+  const ventas = await ventasPorFicha([...new Set([...filas.values()].map((f) => f.id))]);
 
   const grupos: GrupoDuplicado[] = [];
   for (const [userProductId, items] of compartidas) {
@@ -101,22 +102,15 @@ export async function detectarDuplicadosML(itemsML: ItemML[] | null): Promise<Gr
     for (const item of items) {
       const f = filas.get(item.id);
       if (!f || delGrupo.has(f.id)) continue;
-      delGrupo.set(f.id, {
-        id: f.id,
-        nombre: f.nombre,
-        sku: f.sku,
-        stock: f.stock,
-        activo: f.activo,
-        meli_item_id: f.meli_item_id,
-        en_tiendanube: f.tiendanube_variant_id != null,
-        ventas: ventas.get(f.id) ?? 0,
-      });
+      delGrupo.set(f.id, ficha(f, ventas));
     }
     if (delGrupo.size < 2) continue; // ya está unificado
 
     const fichas = [...delGrupo.values()];
     const enTN = fichas.filter((f) => f.en_tiendanube);
     grupos.push({
+      clave: userProductId,
+      motivo: "bodega_ml",
       user_product_id: userProductId,
       stock_ml: unidadesDe(items[0])[0]?.stock ?? null,
       fichas,
@@ -124,8 +118,120 @@ export async function detectarDuplicadosML(itemsML: ItemML[] | null): Promise<Gr
     });
   }
 
-  // Primero los que se pueden unir sin pensarlo, y dentro de esos los que más
-  // historial mueven.
+  return ordenar(grupos);
+}
+
+/* ----------------------------------------------------------------------------
+   Mismo SKU en dos fichas (Tienda Nube + una publicación suelta de ML)
+   -------------------------------------------------------------------------- */
+
+/* Se piden los grupos donde conviven una ficha de Tienda Nube y otra que solo
+   vive en Mercado Libre con el MISMO SKU. Es el rastro que deja corregir el SKU
+   en ML después de que el CRM ya le había abierto ficha propia.
+
+   `yaCubiertas` son las fichas que otro criterio (bodega compartida) ya está
+   ofreciendo unir: no tiene sentido listarlas dos veces.
+
+   No se agrupan fichas que sean AMBAS de Tienda Nube: dos variantes de TN con el
+   mismo SKU es un error de captura en la tienda, no un duplicado que el CRM
+   deba fusionar. */
+export async function detectarDuplicadosPorSku(
+  yaCubiertas: Set<string> = new Set(),
+): Promise<GrupoDuplicado[]> {
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("products")
+    .select("id, nombre, sku, stock, activo, tiendanube_variant_id, meli_item_id")
+    .not("sku", "is", null)
+    .not("meli_item_id", "is", null);
+  if (error) throw new Error(error.message);
+  const soloML = ((data ?? []) as FilaCRM[]).filter((f) => f.tiendanube_variant_id == null);
+  if (soloML.length === 0) return [];
+
+  // Contraparte: las fichas de Tienda Nube con esos mismos SKU.
+  const skus = [...new Set(soloML.map((f) => f.sku!.trim()))];
+  const deTN: FilaCRM[] = [];
+  for (let i = 0; i < skus.length; i += 100) {
+    const { data: tn, error: errTN } = await admin
+      .from("products")
+      .select("id, nombre, sku, stock, activo, tiendanube_variant_id, meli_item_id")
+      .in("sku", skus.slice(i, i + 100))
+      .not("tiendanube_variant_id", "is", null);
+    if (errTN) throw new Error(errTN.message);
+    deTN.push(...((tn ?? []) as FilaCRM[]));
+  }
+  if (deTN.length === 0) return [];
+
+  const porSku = new Map<string, { tn: FilaCRM[]; ml: FilaCRM[] }>();
+  const bolsa = (sku: string) => {
+    const k = sku.trim();
+    if (!porSku.has(k)) porSku.set(k, { tn: [], ml: [] });
+    return porSku.get(k)!;
+  };
+  for (const f of deTN) bolsa(f.sku!).tn.push(f);
+  for (const f of soloML) bolsa(f.sku!).ml.push(f);
+
+  const candidatas = [...porSku.entries()].filter(
+    ([, b]) => b.tn.length > 0 && b.ml.length > 0 && [...b.tn, ...b.ml].some((f) => !yaCubiertas.has(f.id)),
+  );
+  if (candidatas.length === 0) return [];
+
+  const ventas = await ventasPorFicha(candidatas.flatMap(([, b]) => [...b.tn, ...b.ml].map((f) => f.id)));
+
+  const grupos: GrupoDuplicado[] = [];
+  for (const [sku, b] of candidatas) {
+    const fichas = [...b.tn, ...b.ml].map((f) => ficha(f, ventas));
+    grupos.push({
+      clave: `sku:${sku}`,
+      motivo: "sku",
+      user_product_id: null,
+      stock_ml: null,
+      fichas,
+      // Con varias fichas de TN compartiendo SKU no hay una obvia: lo decide quien revisa.
+      ganador_id: b.tn.length === 1 ? b.tn[0].id : null,
+    });
+  }
+  return ordenar(grupos);
+}
+
+/* ----------------------------------- Comunes ------------------------------ */
+
+function ficha(f: FilaCRM, ventas: Map<string, number>): FichaDuplicada {
+  return {
+    id: f.id,
+    nombre: f.nombre,
+    sku: f.sku,
+    stock: f.stock,
+    activo: f.activo,
+    meli_item_id: f.meli_item_id,
+    en_tiendanube: f.tiendanube_variant_id != null,
+    ventas: ventas.get(f.id) ?? 0,
+  };
+}
+
+/* Ventas por ficha: es el historial que la fusión va a mover, así que se muestra
+   para que quien decide sepa qué está en juego. */
+async function ventasPorFicha(ids: string[]): Promise<Map<string, number>> {
+  const admin = createAdminClient();
+  const unicos = [...new Set(ids)];
+  const ventas = new Map<string, number>();
+  for (let i = 0; i < unicos.length; i += 100) {
+    const { data, error } = await admin
+      .from("sales")
+      .select("producto_id")
+      .in("producto_id", unicos.slice(i, i + 100));
+    if (error) throw new Error(error.message);
+    for (const v of data ?? []) {
+      const id = v.producto_id as string;
+      ventas.set(id, (ventas.get(id) ?? 0) + 1);
+    }
+  }
+  return ventas;
+}
+
+/* Primero los que se pueden unir sin pensarlo, y dentro de esos los que más
+   historial mueven. */
+function ordenar(grupos: GrupoDuplicado[]): GrupoDuplicado[] {
   return grupos.sort((a, b) => {
     if (!!a.ganador_id !== !!b.ganador_id) return a.ganador_id ? -1 : 1;
     const vA = a.fichas.reduce((s, f) => s + f.ventas, 0);

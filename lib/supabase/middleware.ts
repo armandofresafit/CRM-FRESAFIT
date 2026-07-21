@@ -6,8 +6,19 @@ import { NextResponse, type NextRequest } from "next/server";
 
 /* /api/tiendanube y /api/mercadolibre quedan fuera del gate de sesión: los
    webhooks llegan sin cookies (validan firma/origen adentro) y los
-   conectar/callback verifican sesión por su cuenta. */
-const RUTAS_PUBLICAS = ["/login", "/auth", "/api/tiendanube", "/api/mercadolibre"];
+   conectar/callback verifican sesión por su cuenta.
+
+   /api/inventario/foto igual: la dispara un programador externo cada hora (el
+   plan Hobby de Vercel no da crons horarios) y llega sin cookies. Se lista la
+   ruta exacta, no todo /api/inventario, para no abrir de más. Adentro exige
+   CRON_SECRET o usuario interno, así que sin credencial responde 401. */
+const RUTAS_PUBLICAS = [
+  "/login",
+  "/auth",
+  "/api/tiendanube",
+  "/api/mercadolibre",
+  "/api/inventario/foto",
+];
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });

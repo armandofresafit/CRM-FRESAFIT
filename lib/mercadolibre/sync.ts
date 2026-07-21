@@ -59,6 +59,9 @@ export type UnidadML = {
      mueven la misma bodega (pasa cuando ML clona la publicación para su
      catálogo), así que deben caer en una sola ficha del CRM. */
   userProductId: string | null;
+  /* Galería de la unidad, en orden (la de la variación si la tiene; si no, la
+     del item). Vacía = la publicación no trae fotos. */
+  imagenes: string[];
 };
 
 type FilaProducto = {
@@ -91,6 +94,25 @@ export function clave(itemId: string, variationId: number | null): string {
   return `${itemId}:${variationId ?? ""}`;
 }
 
+/* URL utilizable de una foto de ML (prefiere https). */
+function urlFoto(f: { secure_url?: string | null; url?: string | null }): string | null {
+  return f.secure_url?.trim() || f.url?.trim() || null;
+}
+
+/* Galería de una variación: sus `picture_ids` resueltos contra las fotos del
+   item, en el orden que marca la variación. Si no declara fotos propias hereda
+   las del item (es lo que muestra la publicación). */
+function galeriaDe(item: ItemML, ids?: string[]): string[] {
+  const fotos = item.pictures ?? [];
+  if (ids?.length) {
+    const porId = new Map(fotos.map((f) => [f.id, f]));
+    const propias = ids.map((id) => porId.get(id)).filter(Boolean).map((f) => urlFoto(f!));
+    const limpias = propias.filter((u): u is string => !!u);
+    if (limpias.length > 0) return limpias;
+  }
+  return fotos.map(urlFoto).filter((u): u is string => !!u);
+}
+
 export function unidadesDe(item: ItemML): UnidadML[] {
   const activo = item.status !== "closed";
   const logisticType = item.shipping?.logistic_type ?? null;
@@ -111,6 +133,7 @@ export function unidadesDe(item: ItemML): UnidadML[] {
       activo,
       logisticType,
       userProductId,
+      imagenes: galeriaDe(item, v.picture_ids),
     }));
   }
   return [
@@ -125,8 +148,18 @@ export function unidadesDe(item: ItemML): UnidadML[] {
       activo,
       logisticType,
       userProductId,
+      imagenes: galeriaDe(item),
     },
   ];
+}
+
+/* Columnas de imagen de una unidad, para mezclar en el upsert. Se omiten cuando
+   la publicación no trae fotos: mejor conservar la que ya tenga la ficha que
+   dejarla sin nada. Las fichas vinculadas a Tienda Nube no pasan por aquí —
+   allá manda TN, que es donde están las fotos buenas del catálogo. */
+function fotos(u: UnidadML): Record<string, unknown> {
+  if (u.imagenes.length === 0) return {};
+  return { imagen_url: u.imagenes[0], imagenes: u.imagenes };
 }
 
 /* Upsert de un lote de items de ML, con matching por SKU y propagación. */
@@ -272,6 +305,7 @@ export async function sincronizarItemsML(
         sku: u.sku,
         activo: u.activo,
         ...dePublicacion,
+        ...fotos(u),
         ...(stockCambio ? { stock: u.stock } : {}),
       };
       cambios.push({ id: existente.id, fila });
@@ -342,6 +376,7 @@ export async function sincronizarItemsML(
       activo: u.activo,
       meli_logistic_type: u.logisticType,
       meli_user_product_id: u.userProductId,
+      ...fotos(u),
       ...meliIds,
     });
   }

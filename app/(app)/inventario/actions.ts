@@ -108,9 +108,10 @@ export async function sincronizarMercadolibre(): Promise<{ ok: true; detalle: st
   }
 }
 
-/* Une dos fichas que Mercado Libre reporta como el mismo artículo (publicación
-   original + gemela de catálogo). El historial del perdedor —ventas, movimientos
-   de stock, renglones de pedidos— pasa al ganador y su ficha se borra.
+/* Une dos fichas que resultaron ser el mismo artículo (publicación original +
+   gemela de catálogo de ML, o una publicación suelta que comparte SKU con la
+   ficha de Tienda Nube). El historial del perdedor —ventas, movimientos de
+   stock, renglones de pedidos— pasa al ganador y su ficha se borra.
 
    El stock NO se suma: ambas venían reflejando el MISMO inventario físico. */
 export async function fusionarProductosML(
@@ -121,11 +122,40 @@ export async function fusionarProductosML(
   if (!user) return { error: "No autenticado." };
   if (!esInterno(rol)) return { error: "Solo el equipo interno puede unir fichas." };
 
+  /* Antes de fusionar hay que mirar los vínculos: si el ganador viene de Tienda
+     Nube y no tenía publicación de ML (el caso del mismo SKU), tiene que heredar
+     la del perdedor. Si no, la próxima sync no reconocería esa publicación como
+     ya importada y volvería a abrirle ficha propia. */
+  const { data: fichas, error: errFichas } = await supabase
+    .from("products")
+    .select("id, meli_item_id, meli_variation_id, meli_logistic_type, meli_user_product_id")
+    .in("id", [ganadorId, perdedorId]);
+  if (errFichas) return { error: errFichas.message };
+  const ganador = fichas?.find((f) => f.id === ganadorId);
+  const perdedor = fichas?.find((f) => f.id === perdedorId);
+
   const { error } = await supabase.rpc("fusionar_producto_ml", {
     p_ganador: ganadorId,
     p_perdedor: perdedorId,
   });
   if (error) return { error: error.message };
+
+  if (ganador && perdedor?.meli_item_id && ganador.meli_item_id == null) {
+    const { error: errVinculo } = await supabase
+      .from("products")
+      .update({
+        meli_item_id: perdedor.meli_item_id,
+        meli_variation_id: perdedor.meli_variation_id,
+        meli_logistic_type: perdedor.meli_logistic_type,
+      })
+      .eq("id", ganadorId);
+    if (errVinculo) {
+      return {
+        error: `Las fichas se unieron, pero no se pudo pasar la publicación de Mercado Libre: ${errVinculo.message}`,
+      };
+    }
+  }
+
   revalidatePath("/inventario");
   return { ok: true };
 }

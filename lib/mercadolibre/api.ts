@@ -27,6 +27,15 @@ export type VariacionML = {
   seller_custom_field?: string | null;
   attributes?: AtributoML[];
   attribute_combinations?: AtributoML[]; // "Color: Rojo", "Talla: M", …
+  /* Fotos de ESTA variación: son ids que apuntan a `pictures` del item. */
+  picture_ids?: string[];
+};
+
+/* Foto de la publicación. `secure_url` es la de https; `url` es el respaldo. */
+export type FotoML = {
+  id: string;
+  secure_url?: string | null;
+  url?: string | null;
 };
 
 export type ItemML = {
@@ -46,6 +55,9 @@ export type ItemML = {
      con el mismo user_product_id comparten bodega — es lo que pasa cuando ML
      suma un artículo a su catálogo y crea una publicación gemela. */
   user_product_id?: string | null;
+  /* Galería de la publicación, en orden. Las variaciones referencian estas
+     fotos por id (`picture_ids`). */
+  pictures?: FotoML[];
 };
 
 /* Publicación en Mercado Full (stock en el centro de ML). */

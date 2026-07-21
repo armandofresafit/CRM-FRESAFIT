@@ -697,9 +697,9 @@ export function PanelInventario({
               </div>
               <FichasDuplicadas
                 grupos={reconciliacion.duplicados}
-                onFusionado={(userProductId) =>
+                onFusionado={(clave) =>
                   setReconciliacion((r) =>
-                    r ? { ...r, duplicados: r.duplicados.filter((g) => g.user_product_id !== userProductId) } : r,
+                    r ? { ...r, duplicados: r.duplicados.filter((g) => g.clave !== clave) } : r,
                   )
                 }
               />

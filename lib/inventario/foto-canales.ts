@@ -1,0 +1,98 @@
+/* ============================================================================
+   lib/inventario/foto-canales.ts — Foto horaria del stock en cada canal
+   ----------------------------------------------------------------------------
+   `stock_log` cuenta lo que hace el CRM. Esto cuenta lo que le PASA al
+   inventario, lo mueva quien lo mueva: Astroselling, un ajuste en el panel de
+   Tienda Nube, una venta que el canal descuenta por su cuenta o el propio CRM.
+
+   Cada corrida lee el stock en vivo de los tres lados, guarda el último valor
+   observado (`stock_canal`) y registra un renglón en `stock_canal_log` SOLO si
+   algún número cambió respecto a la foto anterior. Guardar diferencias y no
+   fotos completas mantiene la tabla pequeña: 600 productos × 24 corridas al día
+   serían 14 mil filas diarias de las que casi ninguna aporta algo.
+
+   Es SOLO LECTURA frente a los canales: observa, no corrige.
+   ============================================================================ */
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { leerCanales, stockEnCanales } from "@/lib/inventario/reconciliacion";
+
+export type ResumenFoto = {
+  productos: number; // productos observados
+  cambios: number; // los que se movieron desde la foto anterior
+  nuevos: number; // vistos por primera vez (no cuentan como cambio)
+};
+
+type FilaCanal = {
+  producto_id: string;
+  stock_crm: number | null;
+  stock_tn: number | null;
+  stock_ml: number | null;
+};
+
+export async function tomarFotoCanales(): Promise<ResumenFoto> {
+  const admin = createAdminClient();
+  const lectura = await leerCanales();
+
+  // Foto anterior, para comparar. Una fila por producto, así que cabe entera.
+  const previas = new Map<string, FilaCanal>();
+  const TAM = 1000;
+  for (let desde = 0; ; desde += TAM) {
+    const { data, error } = await admin
+      .from("stock_canal")
+      .select("producto_id, stock_crm, stock_tn, stock_ml")
+      .range(desde, desde + TAM - 1);
+    if (error) throw new Error(error.message);
+    for (const f of (data ?? []) as FilaCanal[]) previas.set(f.producto_id, f);
+    if ((data ?? []).length < TAM) break;
+  }
+
+  const ahora = new Date().toISOString();
+  const actuales: (FilaCanal & { visto_en: string })[] = [];
+  const cambios: Record<string, unknown>[] = [];
+  let nuevos = 0;
+
+  for (const f of lectura.filas) {
+    const { tn, ml } = stockEnCanales(f, lectura);
+    const actual: FilaCanal = { producto_id: f.id, stock_crm: f.stock, stock_tn: tn, stock_ml: ml };
+    actuales.push({ ...actual, visto_en: ahora });
+
+    const previa = previas.get(f.id);
+    if (!previa) {
+      nuevos++;
+      continue;
+    }
+    /* Un canal que hoy devuelve null (desconectado, publicación caída) no es un
+       cambio: es falta de dato. Solo se compara lo que se pudo leer. */
+    const movio = (a: number | null, b: number | null) => a !== null && b !== null && a !== b;
+    if (
+      movio(previa.stock_crm, actual.stock_crm) ||
+      movio(previa.stock_tn, actual.stock_tn) ||
+      movio(previa.stock_ml, actual.stock_ml)
+    ) {
+      cambios.push({
+        producto_id: f.id,
+        stock_crm_ant: previa.stock_crm,
+        stock_crm: actual.stock_crm,
+        stock_tn_ant: previa.stock_tn,
+        stock_tn: actual.stock_tn,
+        stock_ml_ant: previa.stock_ml,
+        stock_ml: actual.stock_ml,
+        detectado_en: ahora,
+      });
+    }
+  }
+
+  for (let i = 0; i < actuales.length; i += 500) {
+    const { error } = await admin
+      .from("stock_canal")
+      .upsert(actuales.slice(i, i + 500), { onConflict: "producto_id" });
+    if (error) throw new Error(error.message);
+  }
+  for (let i = 0; i < cambios.length; i += 500) {
+    const { error } = await admin.from("stock_canal_log").insert(cambios.slice(i, i + 500));
+    if (error) throw new Error(error.message);
+  }
+
+  return { productos: actuales.length, cambios: cambios.length, nuevos };
+}

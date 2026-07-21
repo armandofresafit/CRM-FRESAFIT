@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 /* ============================================================================
-   Fichas que Mercado Libre reporta como el mismo artículo
+   Fichas que son el mismo artículo
    ----------------------------------------------------------------------------
-   Cuando ML suma un artículo a su catálogo crea una publicación gemela que
-   comparte bodega con la original. El CRM las importó como fichas separadas:
-   aquí se listan y se unen de a una, viendo antes qué se queda y qué se mueve.
+   Dos caminos llevan aquí: una publicación gemela de ML que comparte bodega con
+   la original, o una publicación suelta que terminó con el mismo SKU que la
+   ficha de Tienda Nube. En ambos se listan y se unen de a una, viendo antes qué
+   se queda y qué se mueve.
    ============================================================================ */
 
 function Ficha({
@@ -53,14 +54,14 @@ export function FichasDuplicadas({
   onFusionado,
 }: {
   grupos: GrupoDuplicado[];
-  onFusionado: (userProductId: string) => void;
+  onFusionado: (clave: string) => void;
 }) {
   const [pendiente, startFusion] = useTransition();
   const [trabajando, setTrabajando] = useState<string | null>(null);
 
   function unir(grupo: GrupoDuplicado, ganadorId: string) {
     const perdedores = grupo.fichas.filter((f) => f.id !== ganadorId);
-    setTrabajando(grupo.user_product_id);
+    setTrabajando(grupo.clave);
     startFusion(async () => {
       for (const p of perdedores) {
         const r = await fusionarProductosML(ganadorId, p.id);
@@ -75,11 +76,13 @@ export function FichasDuplicadas({
         `Fichas unidas${movidas ? `: ${movidas} venta${movidas === 1 ? "" : "s"} pasaron a la ficha que se quedó` : "."}`,
       );
       setTrabajando(null);
-      onFusionado(grupo.user_product_id);
+      onFusionado(grupo.clave);
     });
   }
 
   if (grupos.length === 0) return null;
+
+  const porSku = grupos.filter((g) => g.motivo === "sku").length;
 
   return (
     <div className="flex flex-col gap-3">
@@ -89,19 +92,30 @@ export function FichasDuplicadas({
         </p>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
           Mercado Libre tiene dos publicaciones sobre la <b>misma bodega</b> (la original y la que
-          creó para su catálogo), y el CRM las importó como productos distintos. Mientras estén
-          separadas, el inventario se cuenta doble y las ventas se reparten entre las dos. Al unirlas
-          el historial pasa a la ficha que se queda y el stock NO se suma: ya era el mismo.
+          creó para su catálogo), y el CRM las importó como productos distintos.
+          {porSku > 0 && (
+            <>
+              {" "}
+              En otros {porSku === 1 ? "1 caso" : `${porSku} casos`} la publicación de ML terminó con
+              el <b>mismo SKU</b> que la ficha de Tienda Nube después de que el CRM ya le había
+              abierto ficha propia.
+            </>
+          )}{" "}
+          Mientras estén separadas, el inventario se cuenta doble y las ventas se reparten entre las
+          dos. Al unirlas el historial pasa a la ficha que se queda y el stock NO se suma: ya era el
+          mismo.
         </p>
       </div>
 
       {grupos.map((g) => {
-        const ocupado = pendiente && trabajando === g.user_product_id;
+        const ocupado = pendiente && trabajando === g.clave;
         return (
-          <div key={g.user_product_id} className="flex flex-col gap-2 rounded-xl border bg-card p-3">
+          <div key={g.clave} className="flex flex-col gap-2 rounded-xl border bg-card p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
-                Bodega compartida {g.user_product_id}
+                {g.motivo === "sku"
+                  ? `Mismo SKU en Tienda Nube y Mercado Libre · ${g.clave.slice(4)}`
+                  : `Bodega compartida ${g.user_product_id}`}
                 {g.stock_ml !== null && ` · ${g.stock_ml} u. en Mercado Libre`}
               </p>
               {g.ganador_id && (
