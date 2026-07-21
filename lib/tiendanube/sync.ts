@@ -140,7 +140,8 @@ export async function sincronizarProductosTN(
   }
 
   // Hub de stock unificado: lo que cambió en TN se reenvía a Mercado Libre.
-  // Nunca rompe la sync a la base: los fallos solo se loggean.
+  // No-op mientras la escritura a canales esté apagada (el default). Nunca
+  // rompe la sync a la base: los fallos solo se loggean.
   if (propagarAML.length > 0) {
     try {
       (await propagarStock("tiendanube", propagarAML)).forEach((e) =>
@@ -156,9 +157,11 @@ export async function sincronizarProductosTN(
 }
 
 /* Sync inversa (CRM → Tienda Nube): empuja stock/precio/costo de un renglón
-   vinculado. Silencioso para productos manuales (sin IDs de Tienda Nube).
-   El webhook product/updated que la tienda dispara de vuelta re-escribe los
-   mismos valores, así que no hay bucle: converge en una vuelta. */
+   vinculado. Silencioso para productos manuales (sin IDs de Tienda Nube), y
+   no-op mientras la escritura a canales esté apagada (el default: ver el
+   candado en actualizarVarianteTN). El webhook product/updated que la tienda
+   dispara de vuelta re-escribe los mismos valores, así que no hay bucle:
+   converge en una vuelta. */
 export async function empujarProductoTN(fila: {
   tiendanube_product_id: number | null;
   tiendanube_variant_id: number | null;

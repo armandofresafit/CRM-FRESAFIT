@@ -6,6 +6,7 @@
    ============================================================================ */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ESCRITURA_CANALES } from "@/lib/inventario/escritura-canales";
 
 const API_BASE = "https://api.tiendanube.com/2025-03";
 const AUTH_BASE = "https://www.tiendanube.com/apps";
@@ -161,13 +162,21 @@ export async function listarProductosTN(cx: ConexionTN): Promise<ProductoTN[]> {
 }
 
 /* Empuja cambios de una variante hacia Tienda Nube (sync inversa CRM → tienda).
-   Solo los campos presentes en `cambios` se tocan. */
+   Solo los campos presentes en `cambios` se tocan.
+
+   CANDADO: con SYNC_ESCRITURA_CANALES apagado (el default) esto es un no-op —
+   el CRM no modifica el catálogo de la tienda. Es la única función que escribe
+   en Tienda Nube, así que el candado cubre toda ruta presente y futura. */
 export async function actualizarVarianteTN(
   cx: ConexionTN,
   productId: number,
   variantId: number,
   cambios: { stock?: number; price?: number; cost?: number },
 ): Promise<void> {
+  if (!ESCRITURA_CANALES) {
+    console.warn("[solo-lectura] escritura a Tienda Nube omitida", { productId, variantId, cambios });
+    return;
+  }
   const res = await tnFetch(cx, `/products/${productId}/variants/${variantId}`, {
     method: "PUT",
     body: JSON.stringify(cambios),

@@ -7,6 +7,8 @@ import { empujarProductoTN, sincronizacionCompleta } from "@/lib/tiendanube/sync
 import { importacionCompletaML } from "@/lib/mercadolibre/sync";
 import { propagarStock } from "@/lib/inventario/stock-hub";
 import { registrarStockLog } from "@/lib/inventario/stock-log";
+import { reconciliarInventario, type ResumenReconciliacion } from "@/lib/inventario/reconciliacion";
+import { ESCRITURA_CANALES } from "@/lib/inventario/escritura-canales";
 import type { EstadoPedidoProvId, TipoProductoId } from "@/lib/types";
 
 type Resultado = { ok: true } | { error: string };
@@ -69,6 +71,22 @@ export async function sincronizarTiendanube(): Promise<{ ok: true; detalle: stri
   }
 }
 
+/* Reporte de descuadres: compara el stock EN VIVO de cada canal contra el del
+   CRM y devuelve solo lo que no coincide. Solo lectura: no corrige nada. */
+export async function revisarDescuadres(): Promise<
+  { ok: true; resumen: ResumenReconciliacion } | { error: string }
+> {
+  const { user, rol } = await usuarioActual();
+  if (!user) return { error: "No autenticado." };
+  if (!esInterno(rol)) return { error: "Solo el equipo interno puede revisar el inventario." };
+
+  try {
+    return { ok: true, resumen: await reconciliarInventario() };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Falló la revisión de inventario." };
+  }
+}
+
 /* Reconciliación manual con Mercado Libre (botón del panel). */
 export async function sincronizarMercadolibre(): Promise<{ ok: true; detalle: string } | { error: string }> {
   const { user, rol } = await usuarioActual();
@@ -113,12 +131,11 @@ export async function guardarProducto(id: string | null, input: ProductoInput): 
 
   if (id) {
     // El inventario NO se administra desde el diálogo de edición: el stock solo
-    // cambia con el ajuste manual +/− de la tabla (ajustarStock), que es la
-    // única vía autorizada para escribir stock en Tienda Nube / Mercado Libre.
-    // Aquí, para productos vinculados a un canal, se excluye `stock` del update
-    // (así editar nombre/precio/notas nunca pisa el inventario, ni el local ni
-    // el de la tienda); a Tienda Nube solo se le empujan precio y costo, y solo
-    // si cambiaron (evita sobrescribir un precio editado en la tienda).
+    // cambia con el ajuste manual +/− de la tabla (ajustarStock). Aquí, para
+    // productos vinculados a un canal, se excluye `stock` del update (así
+    // editar nombre/precio/notas nunca pisa el inventario). A Tienda Nube se le
+    // empujan precio y costo si cambiaron, pero SOLO con la escritura a canales
+    // habilitada: por defecto el CRM es solo lectura y no toca la tienda.
     const { data: actual, error: errActual } = await supabase
       .from("products")
       .select("tiendanube_product_id, tiendanube_variant_id, meli_item_id, precio, costo")
@@ -140,7 +157,7 @@ export async function guardarProducto(id: string | null, input: ProductoInput): 
     const cambiosTN: { precio?: number | null; costo?: number | null } = {};
     if (fila.precio !== actual.precio) cambiosTN.precio = fila.precio;
     if (fila.costo !== actual.costo) cambiosTN.costo = fila.costo;
-    if (cambiosTN.precio !== undefined || cambiosTN.costo !== undefined) {
+    if (ESCRITURA_CANALES && (cambiosTN.precio !== undefined || cambiosTN.costo !== undefined)) {
       try {
         await empujarProductoTN({
           tiendanube_product_id: actual.tiendanube_product_id,
@@ -170,7 +187,8 @@ export async function ajustarStock(id: string, stock: number): Promise<Resultado
   if (!Number.isInteger(stock) || stock < 0) return { error: "El stock debe ser un entero ≥ 0." };
 
   // Valor previo para el ledger (stock_log): éste es el ÚNICO camino manual que
-  // escribe stock en los canales, así que se deja rastro explícito.
+  // toca el stock, así que se deja rastro explícito. Con la escritura a canales
+  // apagada (el default) el ajuste es local: no viaja a Tienda Nube ni a ML.
   const { data: prev } = await supabase.from("products").select("stock").eq("id", id).single();
 
   const { data, error } = await supabase
@@ -184,7 +202,8 @@ export async function ajustarStock(id: string, stock: number): Promise<Resultado
   await registrarStockLog([
     { producto_id: id, canal: "crm", origen: "manual", stock_anterior: prev?.stock ?? null, stock_nuevo: stock },
   ]);
-  // Sync inversa: el ajuste rápido viaja a todos los canales vinculados.
+  // Sync inversa: el ajuste rápido viaja a todos los canales vinculados (no-op
+  // en modo solo lectura, que es el default).
   const errores = await propagarStock("crm", [{ id, ...data, stock }]);
   if (errores.length > 0) {
     return { error: `El stock se guardó en el CRM, pero: ${errores.join(" · ")}` };

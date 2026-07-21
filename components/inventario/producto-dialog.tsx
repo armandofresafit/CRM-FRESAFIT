@@ -42,30 +42,37 @@ export function ProductoDialog({
   producto,
   proveedores,
   gestor,
+  escrituraCanales,
   onClose,
 }: {
   producto: ProductConProveedor | null; // null = alta
   proveedores: Supplier[];
   gestor: boolean;
+  /* false (el default del sistema) = el CRM no modifica nada en las plataformas. */
+  escrituraCanales: boolean;
   onClose: () => void;
 }) {
   const [pending, startTransition] = useTransition();
   /* Vinculado a un canal: nombre/variante se administran allá (la sync los
      pisaría). El stock de un producto vinculado NO se edita aquí: solo cambia
-     con los botones +/− de la tabla (esa es la única vía que escribe stock en
-     los canales). El precio/costo desde este diálogo solo aplican a Tienda Nube
-     (el de ML se administra en ML). */
+     con los botones +/− de la tabla. Con la escritura a canales apagada (el
+     default) nada de lo que se guarde aquí viaja a las plataformas; con ella
+     encendida, el precio/costo se empujan a Tienda Nube (el de ML se
+     administra en ML). */
   const deTiendaNube = producto?.tiendanube_variant_id != null;
   const deMeli = producto?.meli_item_id != null;
   const vinculado = deTiendaNube || deMeli;
-  const avisoCanales =
-    deTiendaNube && deMeli
-      ? "Vinculado a Tienda Nube y Mercado Libre: el precio y costo que guardes aquí se actualizan en Tienda Nube. El stock se ajusta con los botones +/− de la tabla."
-      : deTiendaNube
-        ? "Producto vinculado a Tienda Nube: el nombre y la variante se editan en la tienda; el precio y costo que guardes aquí se actualizan también allá. El stock se ajusta con los botones +/− de la tabla."
-        : deMeli
-          ? "Publicación vinculada a Mercado Libre: nombre, variante y precio se editan allá. El stock se ajusta con los botones +/− de la tabla."
-          : null;
+  const canal =
+    deTiendaNube && deMeli ? "Tienda Nube y Mercado Libre" : deTiendaNube ? "Tienda Nube" : "Mercado Libre";
+  const avisoCanales = !vinculado
+    ? null
+    : !escrituraCanales
+      ? `Vinculado a ${canal}: el nombre y la variante se administran allá. Lo que guardes aquí (precio, costo, notas) se queda en el CRM: no modifica nada en ${canal}. El stock se ajusta con los botones +/− de la tabla.`
+      : deTiendaNube && deMeli
+        ? "Vinculado a Tienda Nube y Mercado Libre: el precio y costo que guardes aquí se actualizan en Tienda Nube. El stock se ajusta con los botones +/− de la tabla."
+        : deTiendaNube
+          ? "Producto vinculado a Tienda Nube: el nombre y la variante se editan en la tienda; el precio y costo que guardes aquí se actualizan también allá. El stock se ajusta con los botones +/− de la tabla."
+          : "Publicación vinculada a Mercado Libre: nombre, variante y precio se editan allá. El stock se ajusta con los botones +/− de la tabla.";
   const [nombre, setNombre] = useState(producto?.nombre ?? "");
   const [tipo, setTipo] = useState<TipoProductoId>(producto?.tipo ?? "cinturones");
   const [variante, setVariante] = useState(producto?.variante ?? "");

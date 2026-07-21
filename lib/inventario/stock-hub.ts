@@ -6,6 +6,10 @@
    anti-bucle NO vive aquí: el LLAMADOR solo propaga cuando el valor nuevo
    difiere del que ya estaba en la base (no-op corta el eco de vuelta).
 
+   OJO: hoy todo esto está APAGADO. Con SYNC_ESCRITURA_CANALES sin definir (el
+   default) propagarStock es un no-op: el CRM no modifica el inventario de
+   ninguna plataforma. Ver lib/inventario/escritura-canales.ts.
+
    Vive en un módulo propio para que tiendanube/sync y mercadolibre/sync no
    se importen entre sí (solo importan los clientes API).
    ============================================================================ */
@@ -13,6 +17,7 @@
 import { actualizarVarianteTN, conexionTiendanube } from "@/lib/tiendanube/api";
 import { actualizarStockML, conexionMercadolibre } from "@/lib/mercadolibre/api";
 import { registrarStockLog, type EntradaStockLog } from "@/lib/inventario/stock-log";
+import { ESCRITURA_CANALES } from "@/lib/inventario/escritura-canales";
 
 export type OrigenStock = "crm" | "tiendanube" | "mercadolibre" | "tiktok";
 
@@ -42,6 +47,11 @@ export type FilaVinculada = {
    decida (mostrarlos al usuario o solo loggearlos). Canal sin conexión
    guardada → se salta en silencio. */
 export async function propagarStock(origen: OrigenStock, filas: FilaVinculada[]): Promise<string[]> {
+  // Modo solo lectura (default): el CRM no escribe stock en ningún canal. Se
+  // corta aquí, y no solo en las funciones de la API, para no ensuciar el
+  // ledger con empujes que nunca ocurrieron.
+  if (!ESCRITURA_CANALES) return [];
+
   const errores: string[] = [];
   const logs: EntradaStockLog[] = []; // una entrada por empuje saliente que sí se aplicó
 

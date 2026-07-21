@@ -9,6 +9,7 @@
    ============================================================================ */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ESCRITURA_CANALES } from "@/lib/inventario/escritura-canales";
 
 const API_BASE = "https://api.mercadolibre.com";
 const AUTH_URL = "https://auth.mercadolibre.com.mx/authorization";
@@ -262,13 +263,21 @@ export async function listarItemsML(cx: ConexionML): Promise<ItemML[]> {
   return items;
 }
 
-/* Sync inversa (CRM/hub → ML): actualiza el stock de un item o variación. */
+/* Sync inversa (CRM/hub → ML): actualiza el stock de un item o variación.
+
+   CANDADO: con SYNC_ESCRITURA_CANALES apagado (el default) esto es un no-op —
+   el CRM no modifica el inventario de Mercado Libre. Es la única función que
+   escribe en ML, así que el candado cubre toda ruta presente y futura. */
 export async function actualizarStockML(
   cx: ConexionML,
   itemId: string,
   variationId: number | null,
   cantidad: number,
 ): Promise<void> {
+  if (!ESCRITURA_CANALES) {
+    console.warn("[solo-lectura] escritura a Mercado Libre omitida", { itemId, variationId, cantidad });
+    return;
+  }
   const body =
     variationId == null
       ? { available_quantity: cantidad }

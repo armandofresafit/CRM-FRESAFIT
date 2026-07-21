@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Boxes,
   DollarSign,
+  Lock,
   PackageX,
   Plus,
   RefreshCw,
@@ -17,7 +18,11 @@ import { toast } from "sonner";
 import { esGestor } from "@/lib/catalogos";
 import { ESTADOS_STOCK, estadoStock, obtenerEstadoStock } from "@/lib/inventario/stock";
 import { formatearMXN } from "@/lib/moneda";
-import { sincronizarMercadolibre, sincronizarTiendanube } from "@/app/(app)/inventario/actions";
+import {
+  revisarDescuadres,
+  sincronizarMercadolibre,
+  sincronizarTiendanube,
+} from "@/app/(app)/inventario/actions";
 import type {
   ProductConProveedor,
   Supplier,
@@ -44,14 +49,17 @@ import { ProveedorDialog } from "@/components/inventario/proveedor-dialog";
 import { TablaPedidosProv } from "@/components/inventario/tabla-pedidos-prov";
 import { PedidoProvDialog } from "@/components/inventario/pedido-prov-dialog";
 import { TablaMovimientos } from "@/components/inventario/tabla-movimientos";
+import { TablaDescuadres } from "@/components/inventario/tabla-descuadres";
+import type { ResumenReconciliacion } from "@/lib/inventario/reconciliacion";
 
-type Pestana = "productos" | "proveedores" | "pedidos" | "movimientos";
+type Pestana = "productos" | "proveedores" | "pedidos" | "movimientos" | "reconciliacion";
 
 const PESTANAS = [
   ["productos", "Productos"],
   ["proveedores", "Proveedores"],
   ["pedidos", "Pedidos a proveedor"],
   ["movimientos", "Historial de stock"],
+  ["reconciliacion", "Reconciliación"],
 ] as const;
 
 /* Solo las pestañas que permiten dar de alta algo (movimientos es de lectura). */
@@ -95,6 +103,7 @@ export function PanelInventario({
   rol,
   tiendanube,
   mercadolibre,
+  escrituraCanales,
 }: {
   productos: ProductConProveedor[];
   proveedores: Supplier[];
@@ -103,6 +112,8 @@ export function PanelInventario({
   rol: RolId;
   tiendanube: { conectada: boolean; ultimaSync: string | null };
   mercadolibre: { conectada: boolean; ultimaSync: string | null };
+  /* false (el default del sistema) = el CRM no modifica nada en las plataformas. */
+  escrituraCanales: boolean;
 }) {
   const gestor = esGestor(rol);
   const [pestana, setPestana] = useState<Pestana>("productos");
@@ -163,6 +174,25 @@ export function PanelInventario({
 
   /* Filtro de semáforo de stock (solo aplica a la pestaña de productos). */
   const [filtroStock, setFiltroStock] = useState("todos");
+
+  /* Reconciliación: se corre a demanda (lee los catálogos en vivo de cada
+     canal), así que el resultado vive aquí hasta que se vuelva a pedir. */
+  const [revisando, startRevision] = useTransition();
+  const [reconciliacion, setReconciliacion] = useState<ResumenReconciliacion | null>(null);
+
+  function revisar() {
+    startRevision(async () => {
+      const r = await revisarDescuadres();
+      if ("error" in r) {
+        toast.error(r.error);
+        return;
+      }
+      setReconciliacion(r.resumen);
+      const n = r.resumen.descuadres.length;
+      if (n === 0) toast.success(`Todo cuadra: ${r.resumen.revisados} productos revisados.`);
+      else toast.warning(`${n} producto${n === 1 ? "" : "s"} con descuadre de ${r.resumen.revisados} revisados.`);
+    });
+  }
 
   /* Filtro de canal del historial (solo aplica a la pestaña de movimientos). */
   const [filtroCanalMov, setFiltroCanalMov] = useState("todos");
@@ -437,12 +467,27 @@ export function PanelInventario({
         </div>
       )}
 
+      {/* Modo solo lectura: el CRM importa de las plataformas pero no escribe
+          nada allá. Se avisa donde se edita el stock, para que nadie espere que
+          el ajuste viaje a la tienda. */}
+      {!escrituraCanales && (tiendanube.conectada || mercadolibre.conectada) && pestana === "productos" && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border bg-muted/40 px-4 py-3">
+          <Lock className="mt-0.5 size-[16px] shrink-0 text-muted-foreground" strokeWidth={1.9} aria-hidden="true" />
+          <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+            <b className="font-semibold text-foreground">Modo solo lectura.</b> El CRM importa el inventario de
+            Tienda Nube y Mercado Libre, pero no modifica nada allá. Los ajustes de stock, precio y costo que
+            hagas aquí se quedan en el CRM.
+          </p>
+        </div>
+      )}
+
       {pestana === "productos" && (
         <TablaProductos
           productos={productos}
           busqueda={busqueda}
           filtroTipo={filtroTipo}
           filtroStock={filtroStock}
+          escrituraCanales={escrituraCanales}
           onEditar={setProductoDialog}
         />
       )}
@@ -458,11 +503,66 @@ export function PanelInventario({
       )}
       {pestana === "movimientos" && <TablaMovimientos movimientos={movimientosFiltrados} />}
 
+      {pestana === "reconciliacion" && (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3 rounded-xl border bg-card px-4 py-3.5 md:flex-row md:items-center md:justify-between">
+            <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+              Compara el stock del CRM contra el que tienen <b>en este momento</b> Tienda Nube y
+              Mercado Libre, y lista solo lo que no coincide. Es de solo lectura: no corrige nada.
+              Para arreglar un descuadre, ajústalo con los botones +/− en Productos.
+            </p>
+            <Button
+              variant="outline"
+              onClick={revisar}
+              disabled={revisando}
+              className="h-auto shrink-0 gap-1.5 rounded-[11px] px-[15px] py-2.5 text-[13.5px] font-semibold"
+            >
+              <RefreshCw className={cn("size-[15px]", revisando && "animate-spin")} strokeWidth={1.9} aria-hidden="true" />
+              {revisando ? "Revisando…" : reconciliacion ? "Revisar de nuevo" : "Revisar ahora"}
+            </Button>
+          </div>
+
+          {revisando && !reconciliacion && (
+            <p className="text-sm italic text-muted-foreground">
+              Leyendo los catálogos de los canales… puede tardar un poco si hay muchos productos.
+            </p>
+          )}
+
+          {reconciliacion && (
+            <>
+              <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
+                <span>
+                  <b className="text-foreground">{reconciliacion.revisados}</b> productos revisados ·{" "}
+                  <b className={cn(reconciliacion.descuadres.length > 0 ? "text-red-600" : "text-green-600")}>
+                    {reconciliacion.descuadres.length}
+                  </b>{" "}
+                  con descuadre
+                </span>
+                {!reconciliacion.tnConectada && (
+                  <span className="rounded-full border px-2 py-0.5 text-xs">Tienda Nube no conectada</span>
+                )}
+                {!reconciliacion.mlConectada && (
+                  <span className="rounded-full border px-2 py-0.5 text-xs">Mercado Libre no conectado</span>
+                )}
+              </div>
+              <TablaDescuadres descuadres={reconciliacion.descuadres} />
+            </>
+          )}
+
+          {!reconciliacion && !revisando && (
+            <p className="text-sm italic text-muted-foreground">
+              Pulsa «Revisar ahora» para generar el reporte.
+            </p>
+          )}
+        </div>
+      )}
+
       {productoDialog && (
         <ProductoDialog
           producto={productoDialog === "nuevo" ? null : productoDialog}
           proveedores={proveedores}
           gestor={gestor}
+          escrituraCanales={escrituraCanales}
           onClose={() => setProductoDialog(null)}
         />
       )}

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { estadoTiendanube } from "@/lib/tiendanube/api";
 import { estadoMercadolibre } from "@/lib/mercadolibre/api";
 import { PanelInventario } from "@/components/inventario/panel";
+import { ESCRITURA_CANALES } from "@/lib/inventario/escritura-canales";
 import type { ProductConProveedor, Supplier, SupplierOrderConDetalle, RolId, StockLog } from "@/lib/types";
 
 export const metadata = { title: "Inventario · Fresafit" };
@@ -54,6 +55,7 @@ export default async function InventarioPage() {
       rol={rol}
       tiendanube={tiendanube}
       mercadolibre={mercadolibre}
+      escrituraCanales={ESCRITURA_CANALES}
     />
   );
 }

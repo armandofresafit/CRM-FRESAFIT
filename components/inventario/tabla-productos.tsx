@@ -52,15 +52,21 @@ export function TablaProductos({
   busqueda,
   filtroTipo,
   filtroStock,
+  escrituraCanales,
   onEditar,
 }: {
   productos: ProductConProveedor[];
   busqueda: string;
   filtroTipo: string;
   filtroStock: string; // "todos" | agotado | por_acabarse | ok
+  /* false (el default del sistema) = el ajuste es local, no viaja a los canales. */
+  escrituraCanales: boolean;
   onEditar: (p: ProductConProveedor) => void;
 }) {
   const [, startTransition] = useTransition();
+  const tituloAjuste = escrituraCanales
+    ? undefined
+    : "Ajuste local: el stock cambia solo en el CRM, no en Tienda Nube ni Mercado Libre.";
 
   function cambiarStock(p: ProductConProveedor, delta: number) {
     const nuevo = p.stock + delta;
@@ -135,7 +141,7 @@ export function TablaProductos({
       celda: (p) => {
         const estado = estadoStock(p);
         return (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5" title={tituloAjuste}>
             <button
               type="button"
               onClick={() => cambiarStock(p, -1)}

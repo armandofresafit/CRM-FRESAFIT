@@ -40,7 +40,7 @@ export type ResumenSyncML = {
   desactivados: number;
 };
 
-type UnidadML = {
+export type UnidadML = {
   itemId: string;
   variationId: number | null;
   sku: string | null;
@@ -63,11 +63,13 @@ type FilaProducto = {
 
 const CAMPOS_FILA = "id, stock, sku, tiendanube_product_id, tiendanube_variant_id, meli_item_id, meli_variation_id";
 
-function clave(itemId: string, variationId: number | null): string {
+/* Llave de una "unidad" de ML (item sin variaciones, o item+variación). La usan
+   la sync y el reporte de reconciliación para mapear contra `products`. */
+export function clave(itemId: string, variationId: number | null): string {
   return `${itemId}:${variationId ?? ""}`;
 }
 
-function unidadesDe(item: ItemML): UnidadML[] {
+export function unidadesDe(item: ItemML): UnidadML[] {
   const activo = item.status !== "closed";
   if (item.variations?.length) {
     return item.variations.map((v) => ({
@@ -223,10 +225,10 @@ export async function sincronizarItemsML(
     );
   }
 
-  // Propagación (nunca rompe la sync a la base: solo se loggea). Mercado Libre
-  // NUNCA escribe stock en Tienda Nube; solo se alinea ML hacia el CRM al
-  // vincular por SKU. El inventario de TN se toca únicamente desde el ajuste
-  // manual del CRM.
+  // Propagación (nunca rompe la sync a la base: solo se loggea), no-op mientras
+  // la escritura a canales esté apagada (el default). Mercado Libre NUNCA
+  // escribe stock en Tienda Nube; solo se alinea ML hacia el CRM al vincular
+  // por SKU.
   try {
     if (alinearML.length > 0) {
       // Origen "tiendanube" = no reenviar a TN (el valor vigente ya es suyo);
