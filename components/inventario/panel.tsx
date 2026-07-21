@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   AlertTriangle,
   Boxes,
@@ -17,6 +17,14 @@ import {
 import { toast } from "sonner";
 import { esGestor } from "@/lib/catalogos";
 import { ESTADOS_STOCK, estadoStock, obtenerEstadoStock } from "@/lib/inventario/stock";
+import {
+  calcularReabastecimiento,
+  esFull,
+  type EnCamino,
+  type GrupoReorden,
+  type ParamsReorden,
+  type VentaReorden,
+} from "@/lib/inventario/reabastecimiento";
 import { formatearMXN } from "@/lib/moneda";
 import {
   revisarDescuadres,
@@ -50,12 +58,22 @@ import { TablaPedidosProv } from "@/components/inventario/tabla-pedidos-prov";
 import { PedidoProvDialog } from "@/components/inventario/pedido-prov-dialog";
 import { TablaMovimientos } from "@/components/inventario/tabla-movimientos";
 import { TablaDescuadres } from "@/components/inventario/tabla-descuadres";
+import { FichasDuplicadas } from "@/components/inventario/fichas-duplicadas";
+import { TablaReabastecer } from "@/components/inventario/tabla-reabastecer";
+import type { ItemInicialPedido } from "@/components/inventario/pedido-prov-dialog";
 import type { ResumenReconciliacion } from "@/lib/inventario/reconciliacion";
 
-type Pestana = "productos" | "proveedores" | "pedidos" | "movimientos" | "reconciliacion";
+type Pestana =
+  | "productos"
+  | "reabastecer"
+  | "proveedores"
+  | "pedidos"
+  | "movimientos"
+  | "reconciliacion";
 
 const PESTANAS = [
   ["productos", "Productos"],
+  ["reabastecer", "Qué pedir"],
   ["proveedores", "Proveedores"],
   ["pedidos", "Pedidos a proveedor"],
   ["movimientos", "Historial de stock"],
@@ -68,6 +86,14 @@ const ETIQUETA_NUEVO: Partial<Record<Pestana, string>> = {
   proveedores: "Nuevo proveedor",
   pedidos: "Nuevo pedido",
 };
+
+/* Filtro de dónde está guardado el stock (solo tiene sentido con ML conectado):
+   Mercado Full es un almacén distinto al de la bodega. */
+const LOGISTICAS = [
+  ["todos", "Full y bodega"],
+  ["full", "Solo Mercado Full"],
+  ["bodega", "Solo bodega"],
+] as const;
 
 /* Filtro de canal para el historial de movimientos. */
 const CANALES_MOV = [
@@ -100,6 +126,9 @@ export function PanelInventario({
   proveedores,
   pedidos,
   movimientos,
+  ventas,
+  enCamino,
+  paramsReorden,
   rol,
   tiendanube,
   mercadolibre,
@@ -109,6 +138,11 @@ export function PanelInventario({
   proveedores: Supplier[];
   pedidos: SupplierOrderConDetalle[];
   movimientos: StockLog[];
+  /* Ventas de los últimos 90 días: la velocidad de salida de cada producto. */
+  ventas: VentaReorden[];
+  /* Unidades pedidas a proveedor que aún no llegan, por producto. */
+  enCamino: EnCamino;
+  paramsReorden: ParamsReorden;
   rol: RolId;
   tiendanube: { conectada: boolean; ultimaSync: string | null };
   mercadolibre: { conectada: boolean; ultimaSync: string | null };
@@ -166,14 +200,23 @@ export function PanelInventario({
   const [productoDialog, setProductoDialog] = useState<ProductConProveedor | "nuevo" | null>(null);
   const [proveedorDialog, setProveedorDialog] = useState<Supplier | "nuevo" | null>(null);
   const [pedidoDialog, setPedidoDialog] = useState<SupplierOrderConDetalle | "nuevo" | null>(null);
+  /* Renglones con los que abre un pedido nuevo (viene de «Qué pedir»). */
+  const [itemsIniciales, setItemsIniciales] = useState<ItemInicialPedido[] | undefined>(undefined);
 
   /* Búsqueda y filtro de tipo — viven aquí para poder pintarlos junto a las
-     pestañas (solo aplican a "Productos"). */
+     pestañas (aplican a "Productos" y a "Qué pedir"). */
   const [busqueda, setBusqueda] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("todos");
 
   /* Filtro de semáforo de stock (solo aplica a la pestaña de productos). */
   const [filtroStock, setFiltroStock] = useState("todos");
+
+  /* Filtro de almacén: Mercado Full vs. bodega (solo con ML conectado). */
+  const [filtroLogistica, setFiltroLogistica] = useState("todos");
+  const productosVisibles =
+    filtroLogistica === "todos"
+      ? productos
+      : productos.filter((p) => (filtroLogistica === "full" ? esFull(p) : !esFull(p)));
 
   /* Reconciliación: se corre a demanda (lee los catálogos en vivo de cada
      canal), así que el resultado vive aquí hasta que se vuelva a pedir. */
@@ -189,8 +232,13 @@ export function PanelInventario({
       }
       setReconciliacion(r.resumen);
       const n = r.resumen.descuadres.length;
-      if (n === 0) toast.success(`Todo cuadra: ${r.resumen.revisados} productos revisados.`);
-      else toast.warning(`${n} producto${n === 1 ? "" : "s"} con descuadre de ${r.resumen.revisados} revisados.`);
+      const dup = r.resumen.duplicados.length;
+      const repetidas = dup ? ` · ${dup} artículo${dup === 1 ? "" : "s"} con fichas repetidas` : "";
+      if (n === 0) toast.success(`Todo cuadra: ${r.resumen.revisados} productos revisados.${repetidas}`);
+      else
+        toast.warning(
+          `${n} producto${n === 1 ? "" : "s"} con descuadre de ${r.resumen.revisados} revisados.${repetidas}`,
+        );
     });
   }
 
@@ -203,18 +251,43 @@ export function PanelInventario({
      distintas; juntarlos ahogaba el aviso con cientos de variantes agotadas. */
   const agotados = productos.filter((p) => estadoStock(p) === "agotado");
   const porAcabarse = productos.filter((p) => estadoStock(p) === "por_acabarse");
-  const enCamino = pedidos.filter((p) => p.estado !== "recibido" && p.estado !== "cancelado");
+  const pedidosEnCamino = pedidos.filter((p) => p.estado !== "recibido" && p.estado !== "cancelado");
   const valorInventario = productos.reduce((acc, p) => acc + p.stock * (p.costo ?? 0), 0);
+
+  /* Aviso de reorden para la tarjeta KPI: con la ventana y la plataforma por
+     defecto de «Qué pedir» (30 días, todas), para que el número de la tarjeta y
+     el de la tabla cuenten lo mismo al entrar. */
+  const porPedir = useMemo(
+    () =>
+      calcularReabastecimiento({
+        productos,
+        ventas,
+        enCamino,
+        ventanaDias: 30,
+        params: paramsReorden,
+      }).filter((g) => g.urgencia === "pedir_ya"),
+    [productos, ventas, enCamino, paramsReorden],
+  );
 
   function abrirNuevo() {
     if (pestana === "productos") setProductoDialog("nuevo");
     else if (pestana === "proveedores") setProveedorDialog("nuevo");
-    else if (pestana === "pedidos") setPedidoDialog("nuevo");
+    else if (pestana === "pedidos") {
+      setItemsIniciales(undefined);
+      setPedidoDialog("nuevo");
+    }
   }
 
   /* Desde el aviso de stock bajo: llevar a Pedidos y abrir uno nuevo. */
   function generarPedido() {
+    setItemsIniciales(undefined);
     setPestana("pedidos");
+    setPedidoDialog("nuevo");
+  }
+
+  /* Desde «Qué pedir»: pedido nuevo con el renglón y la cantidad sugerida. */
+  function pedirSugerido(grupo: GrupoReorden) {
+    setItemsIniciales([{ producto_id: grupo.productoId, cantidad: grupo.sugerido }]);
     setPedidoDialog("nuevo");
   }
 
@@ -308,8 +381,18 @@ export function PanelInventario({
       </div>
 
       {/* Tarjetas KPI */}
-      <div className="mb-4 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-3.5 md:grid-cols-3 lg:grid-cols-6">
         <StatCard etiqueta="SKUs" valor={String(productos.length)} icono={Boxes} />
+        <button type="button" onClick={() => setPestana("reabastecer")} className="text-left">
+          <StatCard
+            etiqueta="Por pedir"
+            valor={String(porPedir.length)}
+            icono={ShoppingCart}
+            nota="con la venta de 30 días"
+            valorClassName={porPedir.length > 0 ? "text-red-600" : undefined}
+            className="h-full transition-colors hover:bg-accent/40"
+          />
+        </button>
         <StatCard
           etiqueta="Por acabarse"
           valor={String(porAcabarse.length)}
@@ -322,8 +405,13 @@ export function PanelInventario({
           icono={PackageX}
           valorClassName={agotados.length > 0 ? "text-red-600" : undefined}
         />
-        <StatCard etiqueta="En camino" valor={String(enCamino.length)} icono={Truck} />
-        <StatCard etiqueta="Valor inventario" valor={valorCompacto(valorInventario)} icono={DollarSign} />
+        <StatCard etiqueta="En camino" valor={String(pedidosEnCamino.length)} icono={Truck} />
+        <StatCard
+          etiqueta="Valor inventario"
+          valor={valorCompacto(valorInventario)}
+          icono={DollarSign}
+          className="hidden md:block"
+        />
       </div>
 
       {/* Barra de herramientas: pestañas a la izquierda, búsqueda/filtro a la derecha */}
@@ -360,19 +448,19 @@ export function PanelInventario({
 
         <div className="flex-1" />
 
-        {pestana === "productos" && (
+        {(pestana === "productos" || pestana === "reabastecer") && (
           <>
             <div className="relative flex min-w-[260px] items-center">
               <Search className="pointer-events-none absolute left-3 size-4 text-muted-foreground" strokeWidth={1.9} />
               <Input
-                placeholder="Buscar producto, variante o proveedor…"
+                placeholder="Buscar producto, SKU o proveedor…"
                 value={busqueda}
                 onChange={(e) => setBusqueda(e.target.value)}
                 className="h-auto rounded-[10px] bg-card py-2 pl-9"
               />
             </div>
             <Select value={filtroTipo} onValueChange={(v) => setFiltroTipo(v ?? "todos")}>
-              <SelectTrigger className="w-[170px] bg-card">
+              <SelectTrigger className="w-[190px] bg-card">
                 <SelectValue>
                   {(v: string) =>
                     v === "todos" ? "Todos los tipos" : (obtenerTipoProducto(v)?.nombre ?? "Tipo")}
@@ -387,6 +475,11 @@ export function PanelInventario({
                 ))}
               </SelectContent>
             </Select>
+          </>
+        )}
+
+        {pestana === "productos" && (
+          <>
             <Select value={filtroStock} onValueChange={(v) => setFiltroStock(v ?? "todos")}>
               <SelectTrigger className="w-[165px] bg-card">
                 <SelectValue>
@@ -403,6 +496,22 @@ export function PanelInventario({
                 ))}
               </SelectContent>
             </Select>
+            {mercadolibre.conectada && (
+              <Select value={filtroLogistica} onValueChange={(v) => setFiltroLogistica(v ?? "todos")}>
+                <SelectTrigger className="w-[175px] bg-card">
+                  <SelectValue>
+                    {(v: string) => LOGISTICAS.find(([id]) => id === v)?.[1] ?? "Almacén"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {LOGISTICAS.map(([id, label]) => (
+                    <SelectItem key={id} value={id}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </>
         )}
 
@@ -423,6 +532,35 @@ export function PanelInventario({
           </Select>
         )}
       </div>
+
+      {/* Aviso de reorden: lo que se va a agotar ANTES de que llegue un pedido
+          nuevo, según lo que se está vendiendo. Es distinto de «por acabarse»
+          (umbral fijo): aquí manda la velocidad de salida. */}
+      {porPedir.length > 0 && pestana !== "reabastecer" && (
+        <button
+          type="button"
+          onClick={() => setPestana("reabastecer")}
+          className="mb-4 flex w-full items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-left hover:bg-red-100 dark:border-red-900 dark:bg-red-950 dark:hover:bg-red-900/50"
+        >
+          <ShoppingCart className="size-[18px] shrink-0 text-red-600 dark:text-red-400" strokeWidth={1.9} aria-hidden="true" />
+          <span className="flex-1 text-[13.5px] leading-relaxed text-red-800 dark:text-red-300">
+            <b className="font-bold">
+              {porPedir.length === 1
+                ? "1 producto hay que pedirlo ya."
+                : `${porPedir.length} productos hay que pedirlos ya.`}
+            </b>{" "}
+            Con la venta de los últimos 30 días se acaban antes de que llegue un pedido nuevo:{" "}
+            {porPedir
+              .slice(0, 3)
+              .map((g) => g.nombre)
+              .join(", ")}
+            {porPedir.length > 3 ? "…" : ""}
+          </span>
+          <span className="shrink-0 text-[12.5px] font-semibold text-red-700 underline-offset-2 hover:underline dark:text-red-300">
+            Ver qué pedir
+          </span>
+        </button>
+      )}
 
       {/* Aviso: SOLO lo que está por acabarse (lo accionable). Lo agotado se
           consulta con el filtro; en la tienda hay cientos y ahogaban el aviso. */}
@@ -483,7 +621,7 @@ export function PanelInventario({
 
       {pestana === "productos" && (
         <TablaProductos
-          productos={productos}
+          productos={productosVisibles}
           busqueda={busqueda}
           filtroTipo={filtroTipo}
           filtroStock={filtroStock}
@@ -491,10 +629,22 @@ export function PanelInventario({
           onEditar={setProductoDialog}
         />
       )}
+      {pestana === "reabastecer" && (
+        <TablaReabastecer
+          productos={productos}
+          ventas={ventas}
+          enCamino={enCamino}
+          params={paramsReorden}
+          busqueda={busqueda}
+          filtroTipo={filtroTipo}
+          onPedir={pedirSugerido}
+        />
+      )}
       {pestana === "proveedores" && (
         <TablaProveedores
           proveedores={proveedores}
           productos={productos}
+          diasEntregaDefault={paramsReorden.diasEntregaDefault}
           onEditar={setProveedorDialog}
         />
       )}
@@ -545,6 +695,14 @@ export function PanelInventario({
                   <span className="rounded-full border px-2 py-0.5 text-xs">Mercado Libre no conectado</span>
                 )}
               </div>
+              <FichasDuplicadas
+                grupos={reconciliacion.duplicados}
+                onFusionado={(userProductId) =>
+                  setReconciliacion((r) =>
+                    r ? { ...r, duplicados: r.duplicados.filter((g) => g.user_product_id !== userProductId) } : r,
+                  )
+                }
+              />
               <TablaDescuadres descuadres={reconciliacion.descuadres} />
             </>
           )}
@@ -569,6 +727,7 @@ export function PanelInventario({
       {proveedorDialog && (
         <ProveedorDialog
           proveedor={proveedorDialog === "nuevo" ? null : proveedorDialog}
+          diasEntregaDefault={paramsReorden.diasEntregaDefault}
           gestor={gestor}
           onClose={() => setProveedorDialog(null)}
         />
@@ -579,7 +738,11 @@ export function PanelInventario({
           proveedores={proveedores}
           productos={productos}
           gestor={gestor}
-          onClose={() => setPedidoDialog(null)}
+          itemsIniciales={pedidoDialog === "nuevo" ? itemsIniciales : undefined}
+          onClose={() => {
+            setPedidoDialog(null);
+            setItemsIniciales(undefined);
+          }}
         />
       )}
     </div>

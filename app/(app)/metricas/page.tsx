@@ -6,8 +6,9 @@ import type { Customer, Product, RolId, SaleConProducto } from "@/lib/types";
 
 export const metadata = { title: "Métricas · Fresafit" };
 
-/* Ventana de datos: cubre "mes pasado" y su comparativo (el antepasado). */
-const DIAS_VENTANA = 120;
+/* Ventana de datos: un año, para que el rango de fechas a mano tenga historia
+   que filtrar (los periodos fijos solo llegaban a "mes pasado"). */
+const DIAS_VENTANA = 365;
 
 export default async function MetricasPage() {
   const supabase = await createClient();

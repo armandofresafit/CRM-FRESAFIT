@@ -30,7 +30,7 @@ import {
 import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 import { registrarStockLog, type EntradaStockLog } from "@/lib/inventario/stock-log";
 import { HUB_VENTAS_ACTIVO } from "@/lib/inventario/hub-config";
-import { tipoDesdeNombre } from "@/lib/inventario/tipo-producto";
+import { tipoDesdeProducto } from "@/lib/inventario/tipo-producto";
 
 export type ResumenSyncML = {
   items: number;
@@ -38,6 +38,9 @@ export type ResumenSyncML = {
   actualizados: number;
   vinculados: number;
   desactivados: number;
+  /* Publicaciones que no generaron ficha porque su inventario ya lo representa
+     otra (las gemelas de catálogo de Mercado Libre). */
+  gemelas: number;
 };
 
 export type UnidadML = {
@@ -49,6 +52,13 @@ export type UnidadML = {
   precio: number | null;
   stock: number;
   activo: boolean;
+  /* "fulfillment" (Mercado Full), "cross_docking", "drop_off"… Es del item, así
+     que todas las variaciones de una publicación comparten el valor. */
+  logisticType: string | null;
+  /* "MLMU…": la unidad de INVENTARIO de ML. Dos publicaciones que lo comparten
+     mueven la misma bodega (pasa cuando ML clona la publicación para su
+     catálogo), así que deben caer en una sola ficha del CRM. */
+  userProductId: string | null;
 };
 
 type FilaProducto = {
@@ -59,9 +69,21 @@ type FilaProducto = {
   tiendanube_variant_id: number | null;
   meli_item_id: string | null;
   meli_variation_id: number | null;
+  meli_logistic_type: string | null;
+  meli_user_product_id: string | null;
 };
 
-const CAMPOS_FILA = "id, stock, sku, tiendanube_product_id, tiendanube_variant_id, meli_item_id, meli_variation_id";
+const CAMPOS_FILA =
+  "id, stock, sku, tiendanube_product_id, tiendanube_variant_id, meli_item_id, meli_variation_id, meli_logistic_type, meli_user_product_id";
+
+/* Una publicación de ML apuntando a una ficha del CRM (tabla meli_publicaciones). */
+type Publicacion = {
+  meli_item_id: string;
+  meli_variation_id: number | null;
+  producto_id: string;
+  meli_user_product_id: string | null;
+  principal: boolean;
+};
 
 /* Llave de una "unidad" de ML (item sin variaciones, o item+variación). La usan
    la sync y el reporte de reconciliación para mapear contra `products`. */
@@ -71,6 +93,8 @@ export function clave(itemId: string, variationId: number | null): string {
 
 export function unidadesDe(item: ItemML): UnidadML[] {
   const activo = item.status !== "closed";
+  const logisticType = item.shipping?.logistic_type ?? null;
+  const userProductId = item.user_product_id ?? null;
   if (item.variations?.length) {
     return item.variations.map((v) => ({
       itemId: item.id,
@@ -85,6 +109,8 @@ export function unidadesDe(item: ItemML): UnidadML[] {
       precio: v.price ?? item.price ?? null,
       stock: Math.max(0, v.available_quantity ?? 0),
       activo,
+      logisticType,
+      userProductId,
     }));
   }
   return [
@@ -97,6 +123,8 @@ export function unidadesDe(item: ItemML): UnidadML[] {
       precio: item.price ?? null,
       stock: Math.max(0, item.available_quantity ?? 0),
       activo,
+      logisticType,
+      userProductId,
     },
   ];
 }
@@ -122,7 +150,36 @@ export async function sincronizarItemsML(
     }
   }
 
-  // 2) Candidatas por SKU para las unidades aún sin vínculo.
+  // 2) Publicaciones ya registradas de estas unidades. Incluye las SECUNDARIAS
+  //    (las que ML clonó para su catálogo), que no tienen fila propia en
+  //    `products` sino que cuelgan de la ficha de su gemela.
+  const publicadas = new Map<string, Publicacion>();
+  const productoPorUnidadInv = new Map<string, string>(); // user_product_id → producto
+  for (let i = 0; i < itemIds.length; i += 100) {
+    const { data, error } = await admin
+      .from("meli_publicaciones")
+      .select("meli_item_id, meli_variation_id, producto_id, meli_user_product_id, principal")
+      .in("meli_item_id", itemIds.slice(i, i + 100));
+    if (error) throw new Error(error.message);
+    for (const p of (data ?? []) as Publicacion[]) {
+      publicadas.set(clave(p.meli_item_id, p.meli_variation_id), p);
+    }
+  }
+  // Unidades de inventario que ya tienen dueño: si llega una publicación gemela,
+  // se cuelga de esa ficha en vez de crear una nueva.
+  const userProducts = [...new Set(unidades.map((u) => u.userProductId).filter(Boolean))] as string[];
+  for (let i = 0; i < userProducts.length; i += 100) {
+    const { data, error } = await admin
+      .from("products")
+      .select("id, meli_user_product_id")
+      .in("meli_user_product_id", userProducts.slice(i, i + 100));
+    if (error) throw new Error(error.message);
+    for (const f of data ?? []) {
+      productoPorUnidadInv.set(f.meli_user_product_id as string, f.id as string);
+    }
+  }
+
+  // 3) Candidatas por SKU para las unidades aún sin vínculo.
   const skusBuscados = [
     ...new Set(
       unidades
@@ -149,16 +206,61 @@ export async function sincronizarItemsML(
   const logs: EntradaStockLog[] = []; // adopción local del stock de ML, para el ledger
   const reclamadas = new Set<string>();
   let vinculados = 0;
+  let gemelas = 0; // publicaciones colgadas de una ficha existente (catálogo de ML)
 
-  for (const u of unidades) {
+  /* Publicaciones a registrar. La `producto_id` de las filas nuevas todavía no
+     existe, así que esas se resuelven después del insert (por eso la unidad se
+     guarda aparte y se completa al final). */
+  const publicaciones: Publicacion[] = [];
+  const nuevoPorUnidadInv = new Set<string>(); // bodegas que ya reclamó una fila nueva de este lote
+  const gemelasPendientes: UnidadML[] = []; // gemelas de esas filas nuevas
+  const registrar = (u: UnidadML, productoId: string, principal: boolean) => {
+    publicaciones.push({
+      meli_item_id: u.itemId,
+      meli_variation_id: u.variationId,
+      producto_id: productoId,
+      meli_user_product_id: u.userProductId,
+      principal,
+    });
+    if (u.userProductId) productoPorUnidadInv.set(u.userProductId, productoId);
+  };
+
+  /* Las unidades que ya tienen ficha se procesan primero: así, cuando llega su
+     gemela de catálogo, la bodega ya tiene dueño y la gemela se cuelga en vez de
+     abrir una ficha nueva (el orden en que ML devuelve las publicaciones es
+     arbitrario). */
+  const enOrden = [...unidades].sort(
+    (a, b) =>
+      Number(vinculadas.has(clave(b.itemId, b.variationId))) -
+      Number(vinculadas.has(clave(a.itemId, a.variationId))),
+  );
+
+  for (const u of enOrden) {
     const meliIds = { meli_item_id: u.itemId, meli_variation_id: u.variationId };
     const existente = vinculadas.get(clave(u.itemId, u.variationId));
 
     if (existente) {
+      registrar(u, existente.id, true);
+      /* Datos que son de la PUBLICACIÓN (no del catálogo de TN) y por eso se
+         refrescan siempre: la unidad de inventario —lo que permite detectar dos
+         fichas que son el mismo artículo— y la modalidad de envío. */
+      const dePublicacion: Record<string, unknown> = {};
+      if (u.userProductId && u.userProductId !== existente.meli_user_product_id) {
+        dePublicacion.meli_user_product_id = u.userProductId;
+      }
+      if (u.logisticType !== existente.meli_logistic_type) {
+        dePublicacion.meli_logistic_type = u.logisticType;
+      }
+
       // Vinculada también a Tienda Nube → TN la gobierna por completo (nombre,
       // variante, precio, activo Y stock). Mercado Libre no toca su inventario:
       // el stock de TN solo cambia con el ajuste manual del CRM.
-      if (existente.tiendanube_variant_id != null) continue;
+      if (existente.tiendanube_variant_id != null) {
+        if (Object.keys(dePublicacion).length > 0) {
+          cambios.push({ id: existente.id, fila: dePublicacion });
+        }
+        continue;
+      }
       // Con el hub padre-hijo activo, ML NO dicta stock: solo se adopta catálogo.
       // El stock solo-ML baja por venta (descuento) o ajuste manual, nunca por la
       // sync matutina. Con el flag apagado se mantiene la adopción de siempre.
@@ -169,6 +271,7 @@ export async function sincronizarItemsML(
         precio: u.precio,
         sku: u.sku,
         activo: u.activo,
+        ...dePublicacion,
         ...(stockCambio ? { stock: u.stock } : {}),
       };
       cambios.push({ id: existente.id, fila });
@@ -184,6 +287,26 @@ export async function sincronizarItemsML(
       continue;
     }
 
+    /* Publicación GEMELA: no tiene fila propia porque su inventario ya lo
+       representa otra ficha (típicamente la publicación que ML clonó para su
+       catálogo, o la clonada si la fusión dejó como principal a la otra). Se
+       vuelve a registrar el vínculo —así las ventas que entren por ella caen en
+       la ficha correcta— y NO se toca el producto: lo gobierna su principal. */
+    const yaPublicada = publicadas.get(clave(u.itemId, u.variationId));
+    const dueno = yaPublicada?.producto_id ?? (u.userProductId ? productoPorUnidadInv.get(u.userProductId) : null);
+    if (dueno) {
+      registrar(u, dueno, false);
+      gemelas++;
+      continue;
+    }
+    /* Gemela cuya hermana TAMPOCO existía y se está creando en este mismo lote:
+       la ficha aún no tiene id, así que se anota y se resuelve tras el insert. */
+    if (u.userProductId && nuevoPorUnidadInv.has(u.userProductId)) {
+      gemelasPendientes.push(u);
+      gemelas++;
+      continue;
+    }
+
     const candidatas = (u.sku && porSku.get(u.sku)?.filter((f) => !reclamadas.has(f.id))) || [];
     if (candidatas.length === 1) {
       // Match único por SKU → vincular. En el momento de vincular, el stock
@@ -191,7 +314,15 @@ export async function sincronizarItemsML(
       // y se alinea Mercado Libre hacia él si difiere.
       const fila = candidatas[0];
       reclamadas.add(fila.id);
-      cambios.push({ id: fila.id, fila: meliIds });
+      cambios.push({
+        id: fila.id,
+        fila: {
+          ...meliIds,
+          meli_logistic_type: u.logisticType,
+          meli_user_product_id: u.userProductId,
+        },
+      });
+      registrar(u, fila.id, true);
       vinculados++;
       if (u.stock !== fila.stock) {
         alinearML.push({ ...fila, ...meliIds });
@@ -200,21 +331,45 @@ export async function sincronizarItemsML(
     }
 
     // Sin SKU, sin match o SKU ambiguo (duplicado) → fila nueva.
+    if (u.userProductId) nuevoPorUnidadInv.add(u.userProductId);
     nuevos.push({
       nombre: u.nombre,
       variante: u.variante,
-      tipo: tipoDesdeNombre(u.nombre),
+      tipo: tipoDesdeProducto({ nombre: u.nombre, sku: u.sku }),
       precio: u.precio,
       sku: u.sku,
       stock: u.stock,
       activo: u.activo,
+      meli_logistic_type: u.logisticType,
+      meli_user_product_id: u.userProductId,
       ...meliIds,
     });
   }
 
   if (nuevos.length > 0) {
-    const { error } = await admin.from("products").insert(nuevos);
+    // `select` para conocer los ids recién creados y poder registrar su
+    // publicación principal en meli_publicaciones.
+    const { data, error } = await admin
+      .from("products")
+      .insert(nuevos)
+      .select("id, meli_item_id, meli_variation_id, meli_user_product_id");
     if (error) throw new Error(error.message);
+    for (const f of data ?? []) {
+      publicaciones.push({
+        meli_item_id: f.meli_item_id as string,
+        meli_variation_id: (f.meli_variation_id as number | null) ?? null,
+        producto_id: f.id as string,
+        meli_user_product_id: (f.meli_user_product_id as string | null) ?? null,
+        principal: true,
+      });
+      const up = f.meli_user_product_id as string | null;
+      if (up) productoPorUnidadInv.set(up, f.id as string);
+    }
+    // Ahora sí: las gemelas de esas filas recién creadas ya tienen a quién colgarse.
+    for (const u of gemelasPendientes) {
+      const productoId = u.userProductId ? productoPorUnidadInv.get(u.userProductId) : null;
+      if (productoId) registrar(u, productoId, false);
+    }
   }
   for (let i = 0; i < cambios.length; i += 10) {
     await Promise.all(
@@ -223,6 +378,17 @@ export async function sincronizarItemsML(
         if (error) throw new Error(error.message);
       }),
     );
+  }
+
+  /* Registro de publicaciones: el mapa que usa la importación de ventas para
+     saber a qué ficha pertenece una orden, venga por la publicación original o
+     por la gemela de catálogo. Se reescribe en cada sync (`unidad` es la llave),
+     así que reasignaciones y fusiones quedan al día solas. */
+  for (let i = 0; i < publicaciones.length; i += 200) {
+    const { error } = await admin
+      .from("meli_publicaciones")
+      .upsert(publicaciones.slice(i, i + 200), { onConflict: "unidad" });
+    if (error) console.error("[mercadolibre] registro de publicaciones:", error.message);
   }
 
   // Propagación (nunca rompe la sync a la base: solo se loggea), no-op mientras
@@ -242,7 +408,7 @@ export async function sincronizarItemsML(
   }
 
   await registrarStockLog(logs);
-  return { creados: nuevos.length, actualizados: cambios.length - vinculados, vinculados };
+  return { creados: nuevos.length, actualizados: cambios.length - vinculados, vinculados, gemelas };
 }
 
 /* Sync de un solo item (lo dispara la notificación de ML). */

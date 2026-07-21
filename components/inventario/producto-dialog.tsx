@@ -74,7 +74,7 @@ export function ProductoDialog({
           ? "Producto vinculado a Tienda Nube: el nombre y la variante se editan en la tienda; el precio y costo que guardes aquí se actualizan también allá. El stock se ajusta con los botones +/− de la tabla."
           : "Publicación vinculada a Mercado Libre: nombre, variante y precio se editan allá. El stock se ajusta con los botones +/− de la tabla.";
   const [nombre, setNombre] = useState(producto?.nombre ?? "");
-  const [tipo, setTipo] = useState<TipoProductoId>(producto?.tipo ?? "cinturones");
+  const [tipo, setTipo] = useState<TipoProductoId>(producto?.tipo ?? "otro");
   const [variante, setVariante] = useState(producto?.variante ?? "");
   const [costo, setCosto] = useState(producto?.costo?.toString() ?? "");
   const [precio, setPrecio] = useState(producto?.precio?.toString() ?? "");

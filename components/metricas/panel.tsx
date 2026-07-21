@@ -4,24 +4,33 @@ import { useMemo, useState, useTransition } from "react";
 import { Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { CANALES, esGestor, obtenerCanal } from "@/lib/catalogos";
-import { diasDesdeHoy, formatearFecha, rangosDePeriodo } from "@/lib/fecha";
+import { diasDesdeHoy, formatearFecha, hoyISO, rangoPersonalizado, rangosDePeriodo } from "@/lib/fecha";
 import { formatearMXN } from "@/lib/moneda";
 import { importarVentasTiendanube } from "@/app/(app)/metricas/actions";
-import type { Customer, Product, RolId, SaleConProducto } from "@/lib/types";
+import type { CanalId, Customer, Product, RolId, SaleConProducto } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatCard } from "@/components/compartido/stat-card";
 import { ListaBarras } from "@/components/compartido/lista-barras";
 import { TablaSimple, type Columna } from "@/components/compartido/tabla-simple";
 import { VentaDialog } from "@/components/ventas/venta-dialog";
 import { cn } from "@/lib/utils";
 
-type PeriodoId = "hoy" | "semana" | "mes" | "mes_pasado";
+type PeriodoId = "hoy" | "semana" | "mes" | "mes_pasado" | "personalizado";
 
 const PERIODOS: [PeriodoId, string][] = [
   ["hoy", "Hoy"],
   ["semana", "Semana"],
   ["mes", "Mes"],
   ["mes_pasado", "Mes pasado"],
+  ["personalizado", "Fechas"],
 ];
 
 const ETIQUETA_DELTA: Record<PeriodoId, string> = {
@@ -29,7 +38,12 @@ const ETIQUETA_DELTA: Record<PeriodoId, string> = {
   semana: "vs. semana pasada",
   mes: "vs. mes pasado",
   mes_pasado: "vs. antepasado",
+  personalizado: "vs. periodo anterior",
 };
+
+/* Ventas que se pintan de golpe en la tabla; el resto entra con «Ver más».
+   Con el rango completo son miles de renglones y el navegador se arrastra. */
+const VENTAS_POR_PAGINA = 100;
 
 const COLS_VENTAS = "grid-cols-[90px_130px_minmax(220px,1fr)_70px_120px_110px]";
 
@@ -111,17 +125,32 @@ export function PanelMetricas({
 }) {
   const gestor = esGestor(rol);
   const [periodo, setPeriodo] = useState<PeriodoId>("mes");
+  /* Rango a mano (solo con periodo = "personalizado"). Arranca en el mes en
+     curso para que al abrirlo ya muestre algo coherente. */
+  const [desde, setDesde] = useState(() => hoyISO().slice(0, 8) + "01");
+  const [hasta, setHasta] = useState(hoyISO);
+  /* Plataforma: "todas" o un canal. Afecta TODO el panel, no solo la tabla. */
+  const [canal, setCanal] = useState<CanalId | "todas">("todas");
+  const [visibles, setVisibles] = useState(VENTAS_POR_PAGINA);
   const [ventaDialog, setVentaDialog] = useState<SaleConProducto | "nueva" | null>(null);
   const [importando, startImportar] = useTransition();
 
-  const rangos = rangosDePeriodo(periodo);
+  const rangos =
+    periodo === "personalizado" ? rangoPersonalizado(desde, hasta) : rangosDePeriodo(periodo);
+
+  /* El filtro de plataforma se aplica una sola vez, aquí: de estas dos listas
+     salen los KPIs, las gráficas, el top de productos y la tabla. */
+  const delCanal = useMemo(
+    () => (canal === "todas" ? ventas : ventas.filter((v) => v.canal === canal)),
+    [ventas, canal],
+  );
   const delPeriodo = useMemo(
-    () => ventas.filter((v) => enRango(v.fecha, rangos.actual)),
-    [ventas, rangos.actual],
+    () => delCanal.filter((v) => enRango(v.fecha, rangos.actual)),
+    [delCanal, rangos.actual],
   );
   const delAnterior = useMemo(
-    () => ventas.filter((v) => enRango(v.fecha, rangos.anterior)),
-    [ventas, rangos.anterior],
+    () => delCanal.filter((v) => enRango(v.fecha, rangos.anterior)),
+    [delCanal, rangos.anterior],
   );
 
   /* --- Números clave --- */
@@ -131,7 +160,7 @@ export function PanelMetricas({
   const ticket = delPeriodo.length > 0 ? total / delPeriodo.length : 0;
   const piezasPorVenta = delPeriodo.length > 0 ? piezas / delPeriodo.length : 0;
 
-  /* --- Ventas por día (últimos 14 días, fijo) --- */
+  /* --- Ventas por día (últimos 14 días, fijo; respeta la plataforma) --- */
   const dias = useMemo(() => {
     const lista: { iso: string; total: number }[] = [];
     for (let i = 13; i >= 0; i--) {
@@ -139,12 +168,12 @@ export function PanelMetricas({
       lista.push({ iso, total: 0 });
     }
     const porDia = new Map(lista.map((d) => [d.iso, d]));
-    for (const v of ventas) {
+    for (const v of delCanal) {
       const d = porDia.get(v.fecha);
       if (d) d.total += v.monto;
     }
     return lista;
-  }, [ventas]);
+  }, [delCanal]);
 
   /* --- Por canal: se listan todos los canales del catálogo, incluso en cero
      (atenuados), para que se vea de dónde NO está entrando dinero. "Otro" solo
@@ -183,7 +212,10 @@ export function PanelMetricas({
     return productos.filter((p) => p.activo && !vendidos.has(p.id));
   }, [delPeriodo, productos]);
 
-  const ultimas = ventas.slice(0, 20);
+  /* Todas las ventas del filtro (no las 20 últimas de siempre): es la lista que
+     se revisa para cuadrar contra la plataforma. Se pinta por páginas. */
+  const listadas = delPeriodo.slice(0, visibles);
+  const totalListado = delPeriodo.reduce((a, v) => a + v.monto, 0);
 
   const columnasVenta: Columna<SaleConProducto>[] = [
     {
@@ -277,7 +309,10 @@ export function PanelMetricas({
             {PERIODOS.map(([id, label]) => (
               <button
                 key={id}
-                onClick={() => setPeriodo(id)}
+                onClick={() => {
+                  setPeriodo(id);
+                  setVisibles(VENTAS_POR_PAGINA);
+                }}
                 className={cn(
                   "flex-1 rounded-lg px-3.5 py-2 text-[13px] font-semibold transition-colors md:flex-none",
                   periodo === id
@@ -289,6 +324,28 @@ export function PanelMetricas({
               </button>
             ))}
           </div>
+          <Select
+            value={canal}
+            onValueChange={(v) => {
+              setCanal((v ?? "todas") as CanalId | "todas");
+              setVisibles(VENTAS_POR_PAGINA);
+            }}
+          >
+            <SelectTrigger className="w-full bg-card md:w-[185px]">
+              <SelectValue>
+                {(v: string) =>
+                  v === "todas" ? "Todas las plataformas" : (obtenerCanal(v)?.nombre ?? "Plataforma")}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas las plataformas</SelectItem>
+              {CANALES.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             onClick={() => setVentaDialog("nueva")}
             className="h-10 w-full rounded-xl text-[13.5px] font-semibold shadow-[0_6px_16px_-8px_var(--primary)] md:w-auto"
@@ -298,6 +355,44 @@ export function PanelMetricas({
           </Button>
         </div>
       </div>
+
+      {/* Rango a mano: solo estorba cuando no se está usando */}
+      {periodo === "personalizado" && (
+        <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-xl border bg-card px-4 py-3">
+          <label className="text-[13px] font-semibold text-muted-foreground" htmlFor="ventas-desde">
+            Del
+          </label>
+          <Input
+            id="ventas-desde"
+            type="date"
+            value={desde}
+            max={hasta}
+            onChange={(e) => {
+              setDesde(e.target.value);
+              setVisibles(VENTAS_POR_PAGINA);
+            }}
+            className="h-auto w-auto rounded-[10px] py-2"
+          />
+          <label className="text-[13px] font-semibold text-muted-foreground" htmlFor="ventas-hasta">
+            al
+          </label>
+          <Input
+            id="ventas-hasta"
+            type="date"
+            value={hasta}
+            min={desde}
+            onChange={(e) => {
+              setHasta(e.target.value);
+              setVisibles(VENTAS_POR_PAGINA);
+            }}
+            className="h-auto w-auto rounded-[10px] py-2"
+          />
+          <span className="text-[12.5px] text-muted-foreground">
+            {delPeriodo.length} {delPeriodo.length === 1 ? "venta" : "ventas"} ·{" "}
+            {formatearMXN(totalListado)}
+          </span>
+        </div>
+      )}
 
       {/* Números clave */}
       <div className="mb-4 grid grid-cols-2 gap-3.5 md:grid-cols-4">
@@ -385,23 +480,43 @@ export function PanelMetricas({
         )}
       </div>
 
-      {/* Últimas ventas (clic en el producto para corregir) */}
-      {ultimas.length === 0 ? (
+      {/* Ventas del periodo (clic en el producto para corregir) */}
+      {delPeriodo.length === 0 ? (
         <div className={cn(TARJETA, "px-6")}>
-          <h2 className={cn(ROTULO, "mb-2")}>Últimas ventas</h2>
+          <h2 className={cn(ROTULO, "mb-2")}>Ventas</h2>
           <p className="text-sm italic text-muted-foreground">
-            Aún no hay ventas registradas. Usa «+ Registrar venta»
-            {tiendanube.conectada ? " o «Importar de Tienda Nube»" : ""}.
+            {ventas.length === 0
+              ? `Aún no hay ventas registradas. Usa «+ Registrar venta»${tiendanube.conectada ? " o «Importar de Tienda Nube»" : ""}.`
+              : "No hubo ventas con esos filtros. Prueba con otro periodo o plataforma."}
           </p>
         </div>
       ) : (
-        <TablaSimple
-          cols={COLS_VENTAS}
-          titulo="Últimas ventas"
-          columnas={columnasVenta}
-          datos={ultimas}
-          filaKey={(v) => v.id}
-        />
+        <>
+          <TablaSimple
+            cols={COLS_VENTAS}
+            titulo={
+              <>
+                Ventas del periodo · {delPeriodo.length}{" "}
+                {delPeriodo.length === 1 ? "venta" : "ventas"} ·{" "}
+                <span className="text-foreground">{formatearMXN(totalListado)}</span>
+              </>
+            }
+            columnas={columnasVenta}
+            datos={listadas}
+            filaKey={(v) => v.id}
+          />
+          {listadas.length < delPeriodo.length && (
+            <div className="mt-3 flex justify-center">
+              <Button
+                variant="outline"
+                onClick={() => setVisibles((n) => n + VENTAS_POR_PAGINA)}
+                className="h-10 rounded-xl text-[13.5px] font-semibold"
+              >
+                Ver más ({delPeriodo.length - listadas.length} restantes)
+              </Button>
+            </div>
+          )}
+        </>
       )}
 
       {ventaDialog && (

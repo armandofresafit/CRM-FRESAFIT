@@ -23,10 +23,13 @@ import type { Supplier } from "@/lib/types";
 /* Alta y edición de un proveedor. */
 export function ProveedorDialog({
   proveedor,
+  diasEntregaDefault,
   gestor,
   onClose,
 }: {
   proveedor: Supplier | null; // null = alta
+  /* El que usa «Qué pedir» cuando este proveedor no tiene el suyo capturado. */
+  diasEntregaDefault: number;
   gestor: boolean;
   onClose: () => void;
 }) {
@@ -34,6 +37,7 @@ export function ProveedorDialog({
   const [nombre, setNombre] = useState(proveedor?.nombre ?? "");
   const [telefono, setTelefono] = useState(proveedor?.telefono ?? "");
   const [correo, setCorreo] = useState(proveedor?.correo ?? "");
+  const [diasEntrega, setDiasEntrega] = useState(proveedor?.dias_entrega?.toString() ?? "");
   const [notas, setNotas] = useState(proveedor?.notas ?? "");
 
   function guardar() {
@@ -41,7 +45,12 @@ export function ProveedorDialog({
       toast.error("El proveedor necesita un nombre.");
       return;
     }
-    const input: ProveedorInput = { nombre, telefono, correo, notas };
+    const dias = diasEntrega.trim() === "" ? null : Math.trunc(Number(diasEntrega));
+    if (dias !== null && (!Number.isFinite(dias) || dias < 0)) {
+      toast.error("Los días de entrega deben ser un número de días.");
+      return;
+    }
+    const input: ProveedorInput = { nombre, telefono, correo, dias_entrega: dias, notas };
     startTransition(async () => {
       try {
         const r = await guardarProveedor(proveedor?.id ?? null, input);
@@ -115,6 +124,24 @@ export function ProveedorDialog({
                 onChange={(e) => setCorreo(e.target.value)}
               />
             </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="prov-dias">Días que tarda en llegar un pedido</Label>
+            <Input
+              id="prov-dias"
+              type="number"
+              min={0}
+              inputMode="numeric"
+              placeholder={String(diasEntregaDefault)}
+              value={diasEntrega}
+              onChange={(e) => setDiasEntrega(e.target.value)}
+            />
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              Desde que se hace el pedido hasta que entra a la bodega (producción, tránsito y
+              aduana). Es lo que usa «Qué pedir» para avisar con tiempo; si se deja vacío se toman{" "}
+              {diasEntregaDefault} días.
+            </p>
           </div>
 
           <div className="flex flex-col gap-1.5">

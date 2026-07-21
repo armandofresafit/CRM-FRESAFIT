@@ -30,6 +30,9 @@ export type ProveedorInput = {
   nombre: string;
   telefono: string;
   correo: string;
+  /* Días que tarda en llegar un pedido de este proveedor (null = default global
+     del reabastecimiento). */
+  dias_entrega: number | null;
   notas: string;
 };
 
@@ -98,11 +101,33 @@ export async function sincronizarMercadolibre(): Promise<{ ok: true; detalle: st
     revalidatePath("/inventario");
     return {
       ok: true,
-      detalle: `Sincronizado: ${r.items} publicaciones (${r.creados} nuevas, ${r.vinculados} vinculadas por SKU, ${r.actualizados} actualizadas${r.desactivados ? `, ${r.desactivados} desactivadas` : ""}).`,
+      detalle: `Sincronizado: ${r.items} publicaciones (${r.creados} nuevas, ${r.vinculados} vinculadas por SKU, ${r.actualizados} actualizadas${r.gemelas ? `, ${r.gemelas} gemelas de catálogo` : ""}${r.desactivados ? `, ${r.desactivados} desactivadas` : ""}).`,
     };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Falló la sincronización con Mercado Libre." };
   }
+}
+
+/* Une dos fichas que Mercado Libre reporta como el mismo artículo (publicación
+   original + gemela de catálogo). El historial del perdedor —ventas, movimientos
+   de stock, renglones de pedidos— pasa al ganador y su ficha se borra.
+
+   El stock NO se suma: ambas venían reflejando el MISMO inventario físico. */
+export async function fusionarProductosML(
+  ganadorId: string,
+  perdedorId: string,
+): Promise<Resultado> {
+  const { supabase, user, rol } = await usuarioActual();
+  if (!user) return { error: "No autenticado." };
+  if (!esInterno(rol)) return { error: "Solo el equipo interno puede unir fichas." };
+
+  const { error } = await supabase.rpc("fusionar_producto_ml", {
+    p_ganador: ganadorId,
+    p_perdedor: perdedorId,
+  });
+  if (error) return { error: error.message };
+  revalidatePath("/inventario");
+  return { ok: true };
 }
 
 /* ============================ Productos =================================== */
@@ -231,11 +256,14 @@ export async function guardarProveedor(id: string | null, input: ProveedorInput)
 
   const nombre = input.nombre.trim();
   if (!nombre) return { error: "El proveedor necesita un nombre." };
+  if (input.dias_entrega !== null && (!Number.isInteger(input.dias_entrega) || input.dias_entrega < 0))
+    return { error: "Los días de entrega deben ser un entero ≥ 0." };
 
   const fila = {
     nombre,
     telefono: input.telefono.trim() || null,
     correo: input.correo.trim() || null,
+    dias_entrega: input.dias_entrega,
     notas: input.notas.trim() || null,
   };
 

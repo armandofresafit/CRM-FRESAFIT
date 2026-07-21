@@ -56,36 +56,54 @@ function aNumero(texto: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/* Renglones con los que arranca un pedido nuevo (los manda «Qué pedir»). */
+export type ItemInicialPedido = { producto_id: string; cantidad: number };
+
 /* Alta y edición de un pedido a proveedor, con sus renglones. */
 export function PedidoProvDialog({
   pedido,
   proveedores,
   productos,
   gestor,
+  itemsIniciales,
   onClose,
 }: {
   pedido: SupplierOrderConDetalle | null; // null = alta
   proveedores: Supplier[];
   productos: ProductConProveedor[];
   gestor: boolean;
+  /* Solo en el alta: precarga renglones (sugerencia de reabastecimiento). */
+  itemsIniciales?: ItemInicialPedido[];
   onClose: () => void;
 }) {
   const [pending, startTransition] = useTransition();
-  const [proveedorId, setProveedorId] = useState(pedido?.proveedor_id ?? "");
+  /* Al pedir desde «Qué pedir» ya se sabe quién surte ese producto. */
+  const proveedorSugerido =
+    itemsIniciales?.map((i) => productos.find((p) => p.id === i.producto_id)?.proveedor_id).find(Boolean) ?? "";
+  const [proveedorId, setProveedorId] = useState(pedido?.proveedor_id ?? proveedorSugerido);
   const [fechaPedido, setFechaPedido] = useState(pedido?.fecha_pedido ?? hoyISO());
   const [fechaEstimada, setFechaEstimada] = useState(pedido?.fecha_estimada ?? "");
   const [estado, setEstado] = useState<EstadoPedidoProvId>(pedido?.estado ?? "pedido");
   const [notas, setNotas] = useState(pedido?.notas ?? "");
-  const [renglones, setRenglones] = useState<Renglon[]>(
-    pedido && pedido.items.length > 0
-      ? pedido.items.map((i) => ({
-          producto_id: i.producto_id,
-          descripcion: i.descripcion ?? "",
-          cantidad: String(i.cantidad),
-          costo_unitario: i.costo_unitario?.toString() ?? "",
-        }))
-      : [renglonVacio()],
-  );
+  const [renglones, setRenglones] = useState<Renglon[]>(() => {
+    if (pedido && pedido.items.length > 0) {
+      return pedido.items.map((i) => ({
+        producto_id: i.producto_id,
+        descripcion: i.descripcion ?? "",
+        cantidad: String(i.cantidad),
+        costo_unitario: i.costo_unitario?.toString() ?? "",
+      }));
+    }
+    if (itemsIniciales?.length) {
+      return itemsIniciales.map((i) => ({
+        producto_id: i.producto_id,
+        descripcion: "",
+        cantidad: String(i.cantidad),
+        costo_unitario: productos.find((p) => p.id === i.producto_id)?.costo?.toString() ?? "",
+      }));
+    }
+    return [renglonVacio()];
+  });
   /* Total: se sugiere la suma de renglones, pero se puede escribir a mano. */
   const [totalManual, setTotalManual] = useState(pedido?.costo_total?.toString() ?? "");
 

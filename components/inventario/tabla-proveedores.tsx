@@ -3,15 +3,18 @@
 import type { ProductConProveedor, Supplier } from "@/lib/types";
 import { TablaSimple, type Columna } from "@/components/compartido/tabla-simple";
 
-const COLS = "grid-cols-[minmax(160px,1fr)_140px_200px_100px_minmax(140px,1fr)]";
+const COLS = "grid-cols-[minmax(160px,1fr)_140px_190px_100px_110px_minmax(120px,1fr)]";
 
 export function TablaProveedores({
   proveedores,
   productos,
+  diasEntregaDefault,
   onEditar,
 }: {
   proveedores: Supplier[];
   productos: ProductConProveedor[];
+  /* El que se usa cuando el proveedor no tiene el suyo capturado. */
+  diasEntregaDefault: number;
   onEditar: (p: Supplier) => void;
 }) {
   if (proveedores.length === 0) {
@@ -77,6 +80,21 @@ export function TablaProveedores({
       clave: "productos",
       label: "Productos",
       celda: (p) => <div className="tabular-nums">{productosPor.get(p.id) ?? 0}</div>,
+    },
+    {
+      clave: "dias_entrega",
+      label: "Entrega",
+      celda: (p) => (
+        <div className="tabular-nums">
+          {p.dias_entrega !== null ? (
+            `${p.dias_entrega} días`
+          ) : (
+            <span className="text-muted-foreground/50" title="Sin capturar: se usa el default">
+              {diasEntregaDefault} días
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       clave: "notas",

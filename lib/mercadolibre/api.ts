@@ -38,7 +38,18 @@ export type ItemML = {
   seller_custom_field?: string | null;
   attributes?: AtributoML[];
   variations: VariacionML[];
+  /* Modalidad de envío de la publicación. "fulfillment" = Mercado Full: la
+     mercancía YA está depositada en un centro de ML, no en nuestra bodega. El
+     dato es del ITEM (no de la variación) y viene en el multiget completo. */
+  shipping?: { logistic_type?: string | null } | null;
+  /* Artículo del vendedor ("MLMU…"): la unidad de INVENTARIO. Dos publicaciones
+     con el mismo user_product_id comparten bodega — es lo que pasa cuando ML
+     suma un artículo a su catálogo y crea una publicación gemela. */
+  user_product_id?: string | null;
 };
+
+/* Publicación en Mercado Full (stock en el centro de ML). */
+export const LOGISTICA_FULL = "fulfillment";
 
 /* El SKU puede venir en seller_custom_field o como atributo SELLER_SKU,
    según cómo se haya creado la publicación. */

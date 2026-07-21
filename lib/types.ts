@@ -119,6 +119,9 @@ export type Supplier = {
   nombre: string;
   telefono: string | null;
   correo: string | null;
+  /* Días que tarda en llegar un pedido de este proveedor (incluye producción,
+     tránsito y aduana). null = usar el default global del reabastecimiento. */
+  dias_entrega: number | null;
   notas: string | null;
   created_by: string | null;
   created_at: string;
@@ -146,13 +149,18 @@ export type Product = {
   tiendanube_variant_id: number | null;
   meli_item_id: string | null;
   meli_variation_id: number | null;
+  /* Modalidad de envío de la publicación de ML: "fulfillment" (Mercado Full,
+     el stock vive en un centro de ML), "cross_docking", "drop_off"… */
+  meli_logistic_type: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string | null;
 };
 
 export type ProductConProveedor = Product & {
-  proveedor: Pick<Supplier, "id" | "nombre"> | null;
+  /* `dias_entrega` viaja aquí porque es la entrada del punto de reorden
+     (lib/inventario/reabastecimiento.ts). */
+  proveedor: Pick<Supplier, "id" | "nombre" | "dias_entrega"> | null;
 };
 
 /* Movimiento de stock (tabla `stock_log`): ledger append-only de cada escritura

@@ -61,6 +61,34 @@ export function diasDesdeHoy(n: number): string {
 
 export type Periodo = { desde: string; hasta: string };
 
+/* Días entre dos fechas ISO (inclusive el primero). */
+function diasEntre(desde: string, hasta: string): number {
+  const ms = Date.parse(`${hasta}T00:00:00`) - Date.parse(`${desde}T00:00:00`);
+  return Math.max(0, Math.round(ms / 86_400_000));
+}
+
+/* Fecha ISO desplazada n días (sirve para cualquier fecha, no solo hoy). */
+function isoMas(fecha: string, n: number): string {
+  const d = new Date(`${fecha}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return aISO(d);
+}
+
+/* Rango libre elegido a mano y su bloque inmediatamente anterior del MISMO
+   largo, para que el Δ de las tarjetas siga teniendo con qué comparar. */
+export function rangoPersonalizado(desde: string, hasta: string): {
+  actual: Periodo;
+  anterior: Periodo;
+} {
+  // Si los escriben al revés, se enderezan solos.
+  const [ini, fin] = desde <= hasta ? [desde, hasta] : [hasta, desde];
+  const largo = diasEntre(ini, fin) + 1;
+  return {
+    actual: { desde: ini, hasta: fin },
+    anterior: { desde: isoMas(ini, -largo), hasta: isoMas(ini, -1) },
+  };
+}
+
 /* Rango del periodo elegido y su equivalente ANTERIOR (para el Δ de
    comparación): hoy↔ayer, semana↔semana pasada, mes↔mes pasado, etc. */
 export function rangosDePeriodo(id: "hoy" | "semana" | "mes" | "mes_pasado"): {

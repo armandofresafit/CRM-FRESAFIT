@@ -17,7 +17,7 @@ import {
 } from "@/lib/tiendanube/api";
 import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 import { registrarStockLog, type EntradaStockLog } from "@/lib/inventario/stock-log";
-import { tipoDesdeNombre } from "@/lib/inventario/tipo-producto";
+import { tipoDesdeProducto } from "@/lib/inventario/tipo-producto";
 
 export type ResumenSync = {
   productos: number;
@@ -119,7 +119,7 @@ export async function sincronizarProductosTN(
       } else {
         nuevos.push({
           ...fila,
-          tipo: tipoDesdeNombre(nombre),
+          tipo: tipoDesdeProducto({ nombre, sku: v.sku }),
           stock: typeof v.stock === "number" ? Math.max(0, v.stock) : 0,
         });
       }

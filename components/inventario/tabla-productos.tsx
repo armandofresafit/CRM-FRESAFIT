@@ -5,6 +5,7 @@ import { Image as ImageIcon, Minus, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { obtenerTipoProducto } from "@/lib/catalogos";
 import { estadoStock } from "@/lib/inventario/stock";
+import { esFull } from "@/lib/inventario/reabastecimiento";
 import { formatearMXN } from "@/lib/moneda";
 import { ajustarStock } from "@/app/(app)/inventario/actions";
 import type { ProductConProveedor } from "@/lib/types";
@@ -88,6 +89,7 @@ export function TablaProductos({
       (filtroStock === "todos" || estadoStock(p) === filtroStock) &&
       (!q ||
         p.nombre.toLowerCase().includes(q) ||
+        (p.sku ?? "").toLowerCase().includes(q) ||
         (p.variante ?? "").toLowerCase().includes(q) ||
         (p.proveedor?.nombre ?? "").toLowerCase().includes(q)),
   );
@@ -120,6 +122,14 @@ export function TablaProductos({
             {p.variante && <span className="ml-1.5 text-muted-foreground">· {p.variante}</span>}
             {!p.activo && <span className="ml-1.5 text-xs italic text-muted-foreground">(inactivo)</span>}
           </button>
+          {esFull(p) && (
+            <span
+              className="shrink-0 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+              title="Mercado Full: este stock está en un centro de Mercado Libre, no en la bodega."
+            >
+              Full
+            </span>
+          )}
         </div>
       ),
     },

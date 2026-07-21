@@ -54,12 +54,19 @@ export const ETIQUETAS = [
   { id: "idea", nombre: "Idea", color: "#00b894" },
 ] as const;
 
-/* --- Tipos de producto del catálogo (Fase 1: Inventario). --- */
+/* --- Tipos de producto del catálogo (Fase 1: Inventario).
+   Son las líneas que el negocio compra y repone POR SEPARADO, no categorías
+   genéricas: powerlift (SKU SBD…) y hebilla (PRM…) se piden distinto, y el
+   modelo nuevo "Pro" (STR###/MQR###) convive con el viejo "OG" (…OG) al mismo
+   tiempo. Ver lib/inventario/tipo-producto.ts para la clasificación automática. */
 export const TIPOS_PRODUCTO = [
-  { id: "cinturones", nombre: "Cinturones", color: "#e84393" },
-  { id: "straps", nombre: "Straps", color: "#0984e3" },
-  { id: "munequeras", nombre: "Muñequeras", color: "#6c5ce7" },
-  { id: "mochilas", nombre: "Mochilas", color: "#e17055" },
+  { id: "cinturon_powerlift", nombre: "Cinturón powerlift", color: "#e84393" },
+  { id: "cinturon_hebilla", nombre: "Cinturones hebilla", color: "#fd79a8" },
+  { id: "straps_pro", nombre: "Straps pro", color: "#0984e3" },
+  { id: "munequeras_pro", nombre: "Muñequeras pro", color: "#6c5ce7" },
+  { id: "straps_viejos", nombre: "Straps viejos", color: "#74b9ff" },
+  { id: "munequeras_viejos", nombre: "Muñequeras viejos", color: "#a29bfe" },
+  { id: "mochilas", nombre: "Mochila", color: "#e17055" },
   { id: "ropa", nombre: "Ropa", color: "#00b894" },
   { id: "otro", nombre: "Otro", color: "#94a3b8" },
 ] as const;
