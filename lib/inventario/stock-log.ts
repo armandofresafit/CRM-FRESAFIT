@@ -16,8 +16,11 @@ export type EntradaStockLog = {
   producto_id: string | null;
   canal: CanalStock;
   origen: string; // manual | tiendanube_sync | mercadolibre_sync | proveedor | ...
-  stock_anterior: number | null; // null cuando no se conoce (p. ej. empuje saliente)
+  stock_anterior: number | null; // null cuando no se conoce
   stock_nuevo: number;
+  /* true = el hub decidió esta escritura pero NO la aplicó (modo simulacro).
+     Sirve para medir si acierta antes de darle permiso de escribir de verdad. */
+  simulado?: boolean;
 };
 
 export async function registrarStockLog(entradas: EntradaStockLog[]): Promise<void> {

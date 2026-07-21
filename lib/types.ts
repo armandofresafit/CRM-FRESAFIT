@@ -141,6 +141,9 @@ export type Product = {
   stock_minimo: number;
   proveedor_id: string | null;
   activo: boolean;
+  /* Se fabrica cuando alguien lo compra (personalizados): no lleva inventario,
+     así que queda fuera del semáforo de stock y de «Qué pedir». */
+  bajo_pedido: boolean;
   notas: string | null;
   imagen_url: string | null; // portada (miniatura); URL del CDN de Tienda Nube
   imagenes: string[]; // galería completa, ordenada

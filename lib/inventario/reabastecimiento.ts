@@ -153,6 +153,7 @@ type ProductoReorden = Pick<
   | "tipo"
   | "stock"
   | "activo"
+  | "bajo_pedido"
   | "meli_item_id"
   | "meli_logistic_type"
   | "tiendanube_variant_id"
@@ -188,7 +189,9 @@ export function calcularReabastecimiento({
   canal = "todas",
   params = PARAMS_REORDEN_DEFAULT,
 }: OpcionesReabastecimiento): GrupoReorden[] {
-  const activos = productos.filter((p) => p.activo);
+  /* Fuera los inactivos y los de bajo pedido: éstos se fabrican contra el pedido
+     del cliente, así que su stock 0 no es un faltante que haya que reponer. */
+  const activos = productos.filter((p) => p.activo && !p.bajo_pedido);
 
   /* 1) Agrupar renglones por SKU (los que no tienen, por su propio id). */
   const grupos = new Map<string, ProductoReorden[]>();

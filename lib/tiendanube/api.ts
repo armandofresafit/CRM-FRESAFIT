@@ -146,6 +146,29 @@ export async function obtenerProductoTN(cx: ConexionTN, id: number): Promise<Pro
   return (await res.json()) as ProductoTN;
 }
 
+/* Stock que tiene AHORA MISMO una variante en la tienda.
+
+   Lo pide el hub justo antes de escribir: mandar el número que el CRM leyó hace
+   rato es lo que borró 27 unidades el 18/07. Con el valor fresco se aplica el
+   MOVIMIENTO (−1) sobre lo que realmente hay, en vez de imponer un resultado.
+
+   `null` = la variante existe pero no lleva control de stock (combos, bundles y
+   personalizados); `undefined` = ya no está en el catálogo. Son cosas distintas
+   y el llamador debe tratarlas distinto. */
+export async function stockVarianteTN(
+  cx: ConexionTN,
+  productId: number,
+  variantId: number,
+): Promise<number | null | undefined> {
+  const res = await tnFetch(cx, `/products/${productId}/variants/${variantId}`);
+  if (res.status === 404) return undefined;
+  if (!res.ok) {
+    throw new Error(`Tienda Nube respondió ${res.status} al pedir la variante ${variantId}.`);
+  }
+  const v = (await res.json()) as { stock?: number | null };
+  return typeof v.stock === "number" ? Math.max(0, v.stock) : null;
+}
+
 /* Catálogo completo (incluye no publicados), paginado. */
 export async function listarProductosTN(cx: ConexionTN): Promise<ProductoTN[]> {
   const POR_PAGINA = 200;

@@ -256,7 +256,13 @@ async function aplicarOrdenes(cx: ConexionML, ordenes: OrdenML[]): Promise<Resum
             p_origen: "venta_ml",
           });
           if (errDesc) throw new Error(errDesc.message);
-          const filasHub = (afectados ?? []) as FilaVinculada[];
+          /* El RPC devuelve `descontado`: las unidades que se restaron. Van al
+             hub como `delta` negativo para que cada canal reciba el MOVIMIENTO
+             ("resta 2") aplicado sobre lo que realmente tenga, y no un total
+             calculado aquí que podría estar viejo. */
+          const filasHub = ((afectados ?? []) as (FilaVinculada & { descontado?: number })[]).map(
+            (f) => ({ ...f, delta: f.descontado ? -f.descontado : null }),
+          );
           if (filasHub.length > 0) {
             // origen "mercadolibre" = no reenviar a ML (ya se descontó allá); sí a TN.
             (await propagarStock("mercadolibre", filasHub)).forEach((e) =>

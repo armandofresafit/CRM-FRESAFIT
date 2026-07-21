@@ -259,6 +259,23 @@ export async function obtenerItemML(cx: ConexionML, id: string): Promise<ItemML 
   return (await res.json()) as ItemML;
 }
 
+/* Stock que tiene AHORA MISMO una unidad (item, o item + variación).
+
+   Lo pide el hub justo antes de escribir, por el mismo motivo que en Tienda
+   Nube: se aplica el movimiento sobre lo que hay, no el número que el CRM
+   recordaba. `undefined` = la publicación o la variación ya no existe. */
+export async function stockActualML(
+  cx: ConexionML,
+  itemId: string,
+  variationId: number | null,
+): Promise<number | undefined> {
+  const item = await obtenerItemML(cx, itemId);
+  if (!item) return undefined;
+  if (variationId == null) return Math.max(0, item.available_quantity ?? 0);
+  const v = (item.variations ?? []).find((x) => x.id === variationId);
+  return v ? Math.max(0, v.available_quantity ?? 0) : undefined;
+}
+
 /* Catálogo completo del seller: ids paginados + multiget en lotes de 20.
    Con search_type=scan alcanza también catálogos de más de 1000 items. */
 export async function listarItemsML(cx: ConexionML): Promise<ItemML[]> {

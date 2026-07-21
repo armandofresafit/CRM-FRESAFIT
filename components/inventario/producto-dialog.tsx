@@ -82,6 +82,7 @@ export function ProductoDialog({
   const [stockMinimo, setStockMinimo] = useState(producto?.stock_minimo?.toString() ?? "5");
   const [proveedorId, setProveedorId] = useState(producto?.proveedor_id ?? SIN_PROVEEDOR);
   const [activo, setActivo] = useState(producto?.activo ?? true);
+  const [bajoPedido, setBajoPedido] = useState(producto?.bajo_pedido ?? false);
   const [notas, setNotas] = useState(producto?.notas ?? "");
 
   function guardar() {
@@ -99,6 +100,7 @@ export function ProductoDialog({
       stock_minimo: Math.max(0, Math.trunc(Number(stockMinimo) || 0)),
       proveedor_id: proveedorId === SIN_PROVEEDOR ? null : proveedorId,
       activo,
+      bajo_pedido: bajoPedido,
       notas,
     };
     startTransition(async () => {
@@ -304,6 +306,22 @@ export function ProductoDialog({
               onChange={(e) => setNotas(e.target.value)}
             />
           </div>
+
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={bajoPedido}
+              onChange={(e) => setBajoPedido(e.target.checked)}
+              className="mt-0.5 size-4 accent-primary"
+            />
+            <span>
+              Se hace bajo pedido
+              <span className="block text-[12.5px] leading-relaxed text-muted-foreground">
+                Se fabrica cuando alguien lo compra (personalizados). No lleva inventario: queda
+                fuera de los agotados y de «Qué pedir».
+              </span>
+            </span>
+          </label>
 
           {producto && (
             <label className="flex items-center gap-2 text-sm">

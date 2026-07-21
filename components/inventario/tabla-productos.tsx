@@ -178,7 +178,14 @@ export function TablaProductos({
             >
               <Plus className="size-3.5" />
             </button>
-            {estado === "agotado" ? (
+            {p.bajo_pedido ? (
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[11px] font-bold text-muted-foreground"
+                title="Se fabrica cuando alguien lo compra: no lleva inventario."
+              >
+                Bajo pedido
+              </span>
+            ) : estado === "agotado" ? (
               <span className="inline-flex items-center gap-1 rounded-md bg-red-100 px-2 py-0.5 text-[11px] font-bold text-red-600 dark:bg-red-950 dark:text-red-300">
                 <span className="size-1.5 rounded-full bg-red-500" />
                 Agotado

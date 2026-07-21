@@ -14,11 +14,18 @@ export const ESTADOS_STOCK = [
   { id: "ok", nombre: "Con stock", color: "#22c55e" },              // verde
 ] as const;
 
-type ProductoStock = { stock: number; stock_minimo: number; activo: boolean };
+type ProductoStock = {
+  stock: number;
+  stock_minimo: number;
+  activo: boolean;
+  bajo_pedido?: boolean;
+};
 
-/* Los productos inactivos no alertan: están fuera del catálogo a propósito. */
+/* Los productos inactivos no alertan: están fuera del catálogo a propósito.
+   Los de bajo pedido tampoco: se fabrican cuando alguien los compra, así que su
+   stock 0 es lo normal y no hay nada que reponer. */
 export function estadoStock(p: ProductoStock): EstadoStock {
-  if (!p.activo) return "ok";
+  if (!p.activo || p.bajo_pedido) return "ok";
   if (p.stock === 0) return "agotado";
   if (p.stock <= p.stock_minimo) return "por_acabarse";
   return "ok";

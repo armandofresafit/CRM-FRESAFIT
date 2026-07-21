@@ -53,13 +53,15 @@ export async function sincronizarProductosTN(
     stock: number;
     meli_item_id: string | null;
     meli_variation_id: number | null;
+    /* Mercado Full: el hub no debe escribirle stock (vive en un centro de ML). */
+    meli_logistic_type: string | null;
   };
   const idsVariantes = productos.flatMap((p) => p.variants.map((v) => v.id));
   const existentes = new Map<number, FilaExistente>();
   for (let i = 0; i < idsVariantes.length; i += 200) {
     const { data, error } = await admin
       .from("products")
-      .select("id, tiendanube_variant_id, stock, meli_item_id, meli_variation_id")
+      .select("id, tiendanube_variant_id, stock, meli_item_id, meli_variation_id, meli_logistic_type")
       .in("tiendanube_variant_id", idsVariantes.slice(i, i + 200));
     if (error) throw new Error(error.message);
     for (const fila of (data ?? []) as FilaExistente[]) existentes.set(fila.tiendanube_variant_id, fila);
@@ -108,11 +110,15 @@ export async function sincronizarProductosTN(
           if (existente.meli_item_id) {
             propagarAML.push({
               id: existente.id,
+              sku: v.sku || null,
               tiendanube_product_id: p.id,
               tiendanube_variant_id: v.id,
               meli_item_id: existente.meli_item_id,
               meli_variation_id: existente.meli_variation_id,
+              meli_logistic_type: existente.meli_logistic_type ?? null,
               stock: nuevoStock,
+              // El movimiento que Tienda Nube acaba de aplicar (venta o ajuste).
+              delta: nuevoStock - existente.stock,
             });
           }
         }

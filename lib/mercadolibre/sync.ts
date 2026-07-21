@@ -359,7 +359,10 @@ export async function sincronizarItemsML(
       registrar(u, fila.id, true);
       vinculados++;
       if (u.stock !== fila.stock) {
-        alinearML.push({ ...fila, ...meliIds });
+        /* Al vincular manda el CRM (su stock viene de Tienda Nube), así que aquí
+           SÍ se impone el total: no es un movimiento, es una alineación inicial.
+           Por eso va sin `delta`. */
+        alinearML.push({ ...fila, ...meliIds, meli_logistic_type: u.logisticType });
       }
       continue;
     }

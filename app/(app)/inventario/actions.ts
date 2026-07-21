@@ -23,6 +23,8 @@ export type ProductoInput = {
   stock_minimo: number;
   proveedor_id: string | null;
   activo: boolean;
+  /* Se fabrica contra pedido: no lleva inventario ni alertas de stock. */
+  bajo_pedido: boolean;
   notas: string;
 };
 
@@ -181,6 +183,7 @@ export async function guardarProducto(id: string | null, input: ProductoInput): 
     stock_minimo: input.stock_minimo,
     proveedor_id: input.proveedor_id,
     activo: input.activo,
+    bajo_pedido: input.bajo_pedido,
     notas: input.notas.trim() || null,
   };
 
@@ -250,16 +253,23 @@ export async function ajustarStock(id: string, stock: number): Promise<Resultado
     .from("products")
     .update({ stock })
     .eq("id", id)
-    .select("tiendanube_product_id, tiendanube_variant_id, meli_item_id, meli_variation_id")
+    .select(
+      "sku, tiendanube_product_id, tiendanube_variant_id, meli_item_id, meli_variation_id, meli_logistic_type",
+    )
     .single();
   if (error) return { error: error.message };
   revalidatePath("/inventario");
   await registrarStockLog([
     { producto_id: id, canal: "crm", origen: "manual", stock_anterior: prev?.stock ?? null, stock_nuevo: stock },
   ]);
-  // Sync inversa: el ajuste rápido viaja a todos los canales vinculados (no-op
-  // en modo solo lectura, que es el default).
-  const errores = await propagarStock("crm", [{ id, ...data, stock }]);
+  /* Sync inversa: el ajuste viaja a los canales vinculados (no-op en solo
+     lectura, que es el default). Va con el `delta` para que cada canal reciba el
+     MOVIMIENTO —"suma 3"— y no un total que quizá ya no corresponde a lo que
+     tiene: si alguien vendió entre nuestra lectura y nuestra escritura, sumar 3
+     respeta esa venta; imponer el total la borraría. */
+  const errores = await propagarStock("crm", [
+    { id, ...data, stock, delta: prev ? stock - prev.stock : null },
+  ]);
   if (errores.length > 0) {
     return { error: `El stock se guardó en el CRM, pero: ${errores.join(" · ")}` };
   }
