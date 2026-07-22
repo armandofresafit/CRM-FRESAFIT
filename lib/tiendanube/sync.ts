@@ -17,6 +17,8 @@ import {
 } from "@/lib/tiendanube/api";
 import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 import { registrarStockLog, type EntradaStockLog } from "@/lib/inventario/stock-log";
+import { HUB_VENTAS_ACTIVO } from "@/lib/inventario/hub-config";
+import { esSimulacro, puedeEscribir } from "@/lib/inventario/escritura-canales";
 import { tipoDesdeProducto } from "@/lib/inventario/tipo-producto";
 
 export type ResumenSync = {
@@ -55,13 +57,17 @@ export async function sincronizarProductosTN(
     meli_variation_id: number | null;
     /* Mercado Full: el hub no debe escribirle stock (vive en un centro de ML). */
     meli_logistic_type: string | null;
+    /* Bajo pedido: sin control de stock, el hub no le escribe a ningún canal. */
+    bajo_pedido: boolean;
   };
   const idsVariantes = productos.flatMap((p) => p.variants.map((v) => v.id));
   const existentes = new Map<number, FilaExistente>();
   for (let i = 0; i < idsVariantes.length; i += 200) {
     const { data, error } = await admin
       .from("products")
-      .select("id, tiendanube_variant_id, stock, meli_item_id, meli_variation_id, meli_logistic_type")
+      .select(
+        "id, tiendanube_variant_id, stock, meli_item_id, meli_variation_id, meli_logistic_type, bajo_pedido",
+      )
       .in("tiendanube_variant_id", idsVariantes.slice(i, i + 200));
     if (error) throw new Error(error.message);
     for (const fila of (data ?? []) as FilaExistente[]) existentes.set(fila.tiendanube_variant_id, fila);
@@ -71,6 +77,9 @@ export async function sincronizarProductosTN(
   const cambios: { id: string; fila: Record<string, unknown> }[] = [];
   // Stock que cambió en TN y cuya fila también vive en Mercado Libre → hub.
   const propagarAML: FilaVinculada[] = [];
+  /* Con el hub activo: filas donde el canal se salió del número del CRM y hay
+     que devolverlas a él (el CRM es la fuente de verdad). */
+  const corregirDesdeCRM: FilaVinculada[] = [];
   const logs: EntradaStockLog[] = []; // adopción local del stock de TN, para el ledger
 
   for (const p of productos) {
@@ -92,34 +101,69 @@ export async function sincronizarProductosTN(
         tiendanube_variant_id: v.id,
         imagen_url: imagenVariante ?? imagenes[0] ?? null,
         imagenes,
-        // stock null en TN = "sin control de stock": no pisar el conteo local.
-        ...(typeof v.stock === "number" ? { stock: Math.max(0, v.stock) } : {}),
       };
       const existente = existentes.get(v.id);
+      const nuevoStock = typeof v.stock === "number" ? Math.max(0, v.stock) : null;
+
+      /* ¿Quién manda el stock de ESTE producto?
+
+         Por defecto Tienda Nube lo dicta y el CRM adopta su número, que es como
+         funcionó siempre.
+
+         El CRM manda solo cuando se le entregó el mando de verdad: hub de ventas
+         activo Y escritura real habilitada para este canal y este SKU. Entonces
+         adoptar sería darle la vuelta al modelo, porque el número del CRM ya
+         refleja las ventas de TODOS los canales (cada una lo descuenta al
+         importarse) mientras que el de Tienda Nube solo conoce las suyas:
+         copiarlo borraría las ventas de Mercado Libre. En su lugar se detecta la
+         diferencia y se empuja la del CRM.
+
+         La decisión es POR PRODUCTO a propósito: durante el piloto solo los SKUs
+         de la lista blanca cambian de modelo, y los demás siguen exactamente
+         como hoy. En simulacro tampoco cambia: ahí solo se observa. */
+      const crmManda =
+        HUB_VENTAS_ACTIVO && !esSimulacro() && puedeEscribir("tiendanube", v.sku);
+      const adoptaStock = !crmManda;
+      if (adoptaStock && nuevoStock !== null) fila.stock = nuevoStock;
+
       if (existente) {
         cambios.push({ id: existente.id, fila });
-        const nuevoStock = typeof v.stock === "number" ? Math.max(0, v.stock) : null;
         if (nuevoStock !== null && nuevoStock !== existente.stock) {
-          logs.push({
-            producto_id: existente.id,
-            canal: "crm",
-            origen: "tiendanube_sync",
-            stock_anterior: existente.stock,
-            stock_nuevo: nuevoStock,
-          });
-          if (existente.meli_item_id) {
-            propagarAML.push({
-              id: existente.id,
-              sku: v.sku || null,
-              tiendanube_product_id: p.id,
-              tiendanube_variant_id: v.id,
-              meli_item_id: existente.meli_item_id,
-              meli_variation_id: existente.meli_variation_id,
-              meli_logistic_type: existente.meli_logistic_type ?? null,
-              stock: nuevoStock,
-              // El movimiento que Tienda Nube acaba de aplicar (venta o ajuste).
-              delta: nuevoStock - existente.stock,
+          const enlace = {
+            id: existente.id,
+            sku: v.sku || null,
+            tiendanube_product_id: p.id,
+            tiendanube_variant_id: v.id,
+            meli_item_id: existente.meli_item_id,
+            meli_variation_id: existente.meli_variation_id,
+            meli_logistic_type: existente.meli_logistic_type ?? null,
+            bajo_pedido: existente.bajo_pedido,
+          };
+          if (adoptaStock) {
+            // Modelo viejo: TN manda. El CRM adopta y reenvía a Mercado Libre.
+            logs.push({
+              producto_id: existente.id,
+              canal: "crm",
+              origen: "tiendanube_sync",
+              stock_anterior: existente.stock,
+              stock_nuevo: nuevoStock,
             });
+            if (existente.meli_item_id) {
+              propagarAML.push({
+                ...enlace,
+                stock: nuevoStock,
+                // El movimiento que Tienda Nube acaba de aplicar (venta o ajuste).
+                delta: nuevoStock - existente.stock,
+              });
+            }
+          } else {
+            /* Modelo nuevo: manda el CRM. Tienda Nube quedó desalineada (una
+               venta que ya contamos, un ajuste hecho en su panel…) y se le
+               devuelve el número del CRM. Va SIN delta: no es un movimiento que
+               haya que sumar, es una corrección hacia la fuente de verdad. El
+               hub lee cada canal antes de escribir y solo toca el que difiera,
+               así que este mismo empuje realinea Tienda Nube y Mercado Libre. */
+            corregirDesdeCRM.push({ ...enlace, stock: existente.stock, delta: null });
           }
         }
       } else {
@@ -145,16 +189,27 @@ export async function sincronizarProductosTN(
     );
   }
 
-  // Hub de stock unificado: lo que cambió en TN se reenvía a Mercado Libre.
-  // No-op mientras la escritura a canales esté apagada (el default). Nunca
-  // rompe la sync a la base: los fallos solo se loggean.
+  /* Hub de stock. Los dos empujes son excluyentes —dependen de quién mande— y
+     ambos son no-op mientras la escritura a canales esté apagada (el default).
+     Nunca rompen la sync a la base: los fallos solo se loggean. */
   if (propagarAML.length > 0) {
+    // Modelo viejo: lo que cambió en Tienda Nube se reenvía a Mercado Libre.
     try {
       (await propagarStock("tiendanube", propagarAML)).forEach((e) =>
         console.error("[stock-hub] TN→ML:", e),
       );
     } catch (e) {
       console.error("[stock-hub] TN→ML:", e);
+    }
+  }
+  if (corregirDesdeCRM.length > 0) {
+    // Modelo nuevo: el CRM manda y devuelve a los canales a su número.
+    try {
+      (await propagarStock("crm", corregirDesdeCRM)).forEach((e) =>
+        console.error("[stock-hub] CRM→canales:", e),
+      );
+    } catch (e) {
+      console.error("[stock-hub] CRM→canales:", e);
     }
   }
 

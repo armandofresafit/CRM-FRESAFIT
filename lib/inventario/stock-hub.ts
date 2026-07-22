@@ -91,7 +91,14 @@ export type FilaVinculada = {
 /* Empuja el stock de cada fila a los canales vinculados distintos del origen.
    No lanza: devuelve la lista de avisos (errores y escrituras frenadas) para
    que el llamador decida si mostrarlos o solo registrarlos. */
-export async function propagarStock(origen: OrigenStock, filas: FilaVinculada[]): Promise<string[]> {
+export async function propagarStock(
+  origen: OrigenStock,
+  filas: FilaVinculada[],
+  /* Etiqueta para el ledger cuando se sabe qué causó el empuje. Sin ella se usa
+     el canal de origen ("mercadolibre_sync"), que en una venta despista: el
+     monitor diría "sync ML" para algo que fue una venta. */
+  motivo?: string,
+): Promise<string[]> {
   if (modoEscritura() === "off" || filas.length === 0) return [];
 
   const avisos: string[] = [];
@@ -123,6 +130,7 @@ export async function propagarStock(origen: OrigenStock, filas: FilaVinculada[])
           canal: "tiendanube",
           fila: f,
           origen,
+          motivo,
           simulado,
           avisos,
           logs,
@@ -138,6 +146,7 @@ export async function propagarStock(origen: OrigenStock, filas: FilaVinculada[])
           canal: "mercadolibre",
           fila: f,
           origen,
+          motivo,
           simulado,
           avisos,
           logs,
@@ -176,6 +185,8 @@ type Empuje = {
   canal: CanalEscritura;
   fila: FilaVinculada;
   origen: OrigenStock;
+  /* Qué causó el empuje, para el ledger. Cae al canal de origen si no se sabe. */
+  motivo?: string;
   simulado: boolean;
   avisos: string[];
   logs: EntradaStockLog[];
@@ -212,15 +223,19 @@ async function empujar(e: Empuje): Promise<void> {
       // Escribirles un número los convertiría en productos con stock.
       return;
     }
-    // Ya está donde debe: no escribir. Esto es lo que corta el eco de vuelta.
-    if (actual === fila.stock) return;
 
-    /* Si sabemos qué movimiento causó el cambio, se aplica sobre lo que el canal
-       tiene DE VERDAD. Así, aunque el CRM venga con un número viejo, no borra lo
-       que haya pasado en medio: solo suma o resta lo suyo. */
+    /* Objetivo: por defecto el CRM manda su valor (es la fuente de verdad). Pero
+       si sabemos qué movimiento hubo (delta) y el canal NO está donde ese
+       movimiento esperaba, es que alguien más lo tocó en medio: entonces se
+       preserva su cambio y se le SUMA el nuestro, en vez de imponer el total del
+       CRM (que borraría lo ajeno). Esto es "aplicar el movimiento, no el
+       resultado" — la defensa que habría evitado el borrado de 27 unidades. */
+    const conDelta = fila.delta != null && fila.delta !== 0;
+    const esperadoAntes = conDelta ? fila.stock - fila.delta! : actual;
     const objetivo =
-      fila.delta != null && fila.delta !== 0 ? Math.max(0, actual + fila.delta) : fila.stock;
+      conDelta && actual !== esperadoAntes ? Math.max(0, actual + fila.delta!) : fila.stock;
 
+    // Ya está donde debe: no escribir. Aquí muere el eco de vuelta.
     if (objetivo === actual) return;
 
     if (Math.abs(objetivo - actual) > LIMITE_CORDURA) {
@@ -237,7 +252,7 @@ async function empujar(e: Empuje): Promise<void> {
     e.logs.push({
       producto_id: fila.id ?? null,
       canal: CANAL_LOG[canal],
-      origen: ORIGEN_LOG[e.origen],
+      origen: e.motivo ?? ORIGEN_LOG[e.origen],
       stock_anterior: actual, // el valor REAL del canal, no lo que el CRM creía
       stock_nuevo: objetivo,
       simulado: e.simulado,

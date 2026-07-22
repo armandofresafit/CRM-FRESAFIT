@@ -30,6 +30,7 @@ import {
 import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 import { registrarStockLog, type EntradaStockLog } from "@/lib/inventario/stock-log";
 import { HUB_VENTAS_ACTIVO } from "@/lib/inventario/hub-config";
+import { esSimulacro, puedeEscribir } from "@/lib/inventario/escritura-canales";
 import { tipoDesdeProducto } from "@/lib/inventario/tipo-producto";
 
 export type ResumenSyncML = {
@@ -236,6 +237,9 @@ export async function sincronizarItemsML(
   const nuevos: Record<string, unknown>[] = [];
   const cambios: { id: string; fila: Record<string, unknown> }[] = [];
   const alinearML: FilaVinculada[] = []; // al vincular, el CRM manda → empujar a ML
+  /* Publicaciones que se salieron del número del CRM y hay que devolver a él
+     (solo para los productos donde el CRM manda). */
+  const corregirDesdeCRM: FilaVinculada[] = [];
   const logs: EntradaStockLog[] = []; // adopción local del stock de ML, para el ledger
   const reclamadas = new Set<string>();
   let vinculados = 0;
@@ -285,19 +289,48 @@ export async function sincronizarItemsML(
         dePublicacion.meli_logistic_type = u.logisticType;
       }
 
-      // Vinculada también a Tienda Nube → TN la gobierna por completo (nombre,
-      // variante, precio, activo Y stock). Mercado Libre no toca su inventario:
-      // el stock de TN solo cambia con el ajuste manual del CRM.
+      /* Cuando el CRM manda este producto, Mercado Libre NO dicta su stock: solo
+         se adopta catálogo. El stock baja por venta (descuento) o ajuste manual,
+         nunca por la sync matutina.
+
+         La decisión es POR PRODUCTO —igual que en la sync de Tienda Nube— para
+         que durante el piloto solo los SKUs de la lista blanca cambien de modelo
+         y las otras publicaciones sigan adoptando como siempre. En simulacro no
+         cambia nada: ahí solo se observa. */
+      const crmManda =
+        HUB_VENTAS_ACTIVO && !esSimulacro() && puedeEscribir("mercadolibre", u.sku);
+
+      /* Mercado Libre se salió del número del CRM: se le devuelve.
+
+         Esto hay que mirarlo ANTES del atajo de Tienda Nube de abajo. Si no, un
+         producto vinculado a los dos canales se saltaba entero y nadie vigilaba
+         su publicación de ML: bastaba con que Tienda Nube coincidiera con el CRM
+         para que una desviación de ML se quedara ahí para siempre. */
+      if (crmManda && u.stock !== existente.stock) {
+        corregirDesdeCRM.push({
+          id: existente.id,
+          sku: u.sku,
+          tiendanube_product_id: existente.tiendanube_product_id,
+          tiendanube_variant_id: existente.tiendanube_variant_id,
+          meli_item_id: u.itemId,
+          meli_variation_id: u.variationId,
+          meli_logistic_type: u.logisticType,
+          stock: existente.stock,
+          delta: null, // corrección hacia la fuente de verdad, no un movimiento
+        });
+      }
+
+      // Vinculada también a Tienda Nube → TN gobierna su catálogo (nombre,
+      // variante, precio, activo). De Mercado Libre solo se refrescan los datos
+      // de la publicación.
       if (existente.tiendanube_variant_id != null) {
         if (Object.keys(dePublicacion).length > 0) {
           cambios.push({ id: existente.id, fila: dePublicacion });
         }
         continue;
       }
-      // Con el hub padre-hijo activo, ML NO dicta stock: solo se adopta catálogo.
-      // El stock solo-ML baja por venta (descuento) o ajuste manual, nunca por la
-      // sync matutina. Con el flag apagado se mantiene la adopción de siempre.
-      const stockCambio = !HUB_VENTAS_ACTIVO && u.stock !== existente.stock;
+
+      const stockCambio = !crmManda && u.stock !== existente.stock;
       const fila: Record<string, unknown> = {
         nombre: u.nombre,
         variante: u.variante,
@@ -439,6 +472,12 @@ export async function sincronizarItemsML(
       // solo alinear Mercado Libre.
       (await propagarStock("tiendanube", alinearML)).forEach((e) =>
         console.error("[stock-hub] vincular→ML:", e),
+      );
+    }
+    if (corregirDesdeCRM.length > 0) {
+      // El CRM manda: devuelve a su número las publicaciones que se desviaron.
+      (await propagarStock("crm", corregirDesdeCRM)).forEach((e) =>
+        console.error("[stock-hub] CRM→canales:", e),
       );
     }
   } catch (e) {

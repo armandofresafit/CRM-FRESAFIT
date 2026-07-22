@@ -9,6 +9,8 @@
    ============================================================================ */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { HUB_VENTAS_ACTIVO, productosDelPiloto } from "@/lib/inventario/hub-config";
+import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 import {
   conexionTiendanube,
   listarOrdenesTN,
@@ -160,9 +162,47 @@ async function aplicarOrdenes(ordenes: OrdenTN[]): Promise<ResumenVentasTN> {
     const { data, error } = await admin
       .from("sales")
       .upsert(filas, { onConflict: "canal,referencia_externa", ignoreDuplicates: true })
-      .select("id");
+      .select("id, producto_id, cantidad");
     if (error) throw new Error(error.message);
     insertadas = data?.length ?? 0;
+
+    /* Hub padre-hijo (solo con el flag activo): la venta de Tienda Nube descuenta
+       el stock del CRM y el movimiento se empuja a los demás canales.
+
+       Tienda Nube ya descontó lo suyo al vender, igual que hace Mercado Libre
+       con las suyas; por eso el origen es "tiendanube" y el hub no le reenvía
+       nada a ella, solo a los otros canales.
+
+       `ignoreDuplicates` hace que `data` sean solo las ventas NUEVAS, así los
+       reintentos de webhook o cron no vuelven a descontar. */
+    if (HUB_VENTAS_ACTIVO) {
+      // Durante el piloto, solo los productos de la lista blanca cambian de
+      // modelo; el resto del catálogo sigue gobernado por Tienda Nube.
+      const aDescontar = await productosDelPiloto(
+        (data ?? [])
+          .filter((r) => r.producto_id)
+          .map((r) => ({ producto_id: r.producto_id as string, cantidad: r.cantidad as number })),
+      );
+      if (aDescontar.length > 0) {
+        try {
+          const { data: afectados, error: errDesc } = await admin.rpc("descontar_stock_ventas", {
+            items: aDescontar,
+            p_origen: "venta_tn",
+          });
+          if (errDesc) throw new Error(errDesc.message);
+          const filasHub = ((afectados ?? []) as (FilaVinculada & { descontado?: number })[]).map(
+            (f) => ({ ...f, delta: f.descontado ? -f.descontado : null }),
+          );
+          if (filasHub.length > 0) {
+            (await propagarStock("tiendanube", filasHub, "venta_tn")).forEach((e) =>
+              console.error("[stock-hub] venta TN→ML:", e),
+            );
+          }
+        } catch (e) {
+          console.error("[tiendanube] descuento de stock por venta:", e);
+        }
+      }
+    }
 
     /* Ventas ya importadas antes de que existieran los clientes: se les liga
        el cliente ahora (el upsert de arriba las ignora por duplicadas). Solo

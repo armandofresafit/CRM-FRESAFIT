@@ -23,7 +23,7 @@ import {
   type EnvioML,
   type OrdenML,
 } from "@/lib/mercadolibre/api";
-import { HUB_VENTAS_ACTIVO } from "@/lib/inventario/hub-config";
+import { HUB_VENTAS_ACTIVO, productosDelPiloto } from "@/lib/inventario/hub-config";
 import { propagarStock, type FilaVinculada } from "@/lib/inventario/stock-hub";
 
 export type ResumenVentasML = {
@@ -246,9 +246,13 @@ async function aplicarOrdenes(cx: ConexionML, ordenes: OrdenML[]): Promise<Resum
     // del CRM y se empuja a los demás canales. `ignoreDuplicates` hace que `data`
     // sean solo las ventas NUEVAS, así reintentos de webhook/cron no re-descuentan.
     if (HUB_VENTAS_ACTIVO) {
-      const aDescontar = (data ?? [])
-        .filter((r) => r.producto_id)
-        .map((r) => ({ producto_id: r.producto_id as string, cantidad: r.cantidad as number }));
+      // Durante el piloto, solo los productos de la lista blanca cambian de
+      // modelo; el resto del catálogo sigue gobernado por Tienda Nube.
+      const aDescontar = await productosDelPiloto(
+        (data ?? [])
+          .filter((r) => r.producto_id)
+          .map((r) => ({ producto_id: r.producto_id as string, cantidad: r.cantidad as number })),
+      );
       if (aDescontar.length > 0) {
         try {
           const { data: afectados, error: errDesc } = await admin.rpc("descontar_stock_ventas", {
@@ -265,7 +269,7 @@ async function aplicarOrdenes(cx: ConexionML, ordenes: OrdenML[]): Promise<Resum
           );
           if (filasHub.length > 0) {
             // origen "mercadolibre" = no reenviar a ML (ya se descontó allá); sí a TN.
-            (await propagarStock("mercadolibre", filasHub)).forEach((e) =>
+            (await propagarStock("mercadolibre", filasHub, "venta_ml")).forEach((e) =>
               console.error("[stock-hub] venta ML→TN:", e),
             );
           }

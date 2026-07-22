@@ -95,6 +95,7 @@ returns table (
   sku                   text,
   stock                 int,
   descontado            int,
+  bajo_pedido           boolean,
   tiendanube_product_id bigint,
   tiendanube_variant_id bigint,
   meli_item_id          text,
@@ -121,7 +122,7 @@ begin
        set stock = greatest(0, p.stock - e.cantidad)
       from ent e
      where p.id = e.producto_id
-    returning p.id, p.sku, p.stock as nuevo, e.cantidad as descontado,
+    returning p.id, p.sku, p.stock as nuevo, e.cantidad as descontado, p.bajo_pedido,
               p.tiendanube_product_id, p.tiendanube_variant_id,
               p.meli_item_id, p.meli_variation_id, p.meli_logistic_type
   ),
@@ -133,7 +134,7 @@ begin
         join antes a on a.id = u.id
     returning 1
   )
-  select u.id, u.sku, u.nuevo, u.descontado,
+  select u.id, u.sku, u.nuevo, u.descontado, u.bajo_pedido,
          u.tiendanube_product_id, u.tiendanube_variant_id,
          u.meli_item_id, u.meli_variation_id, u.meli_logistic_type
     from upd u;

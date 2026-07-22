@@ -15,6 +15,7 @@ const ORIGEN_LABEL: Record<string, string> = {
   tiktok_sync: "Sync TikTok",
   proveedor: "Recepción proveedor",
   venta_ml: "Venta Mercado Libre",
+  venta_tn: "Venta Tienda Nube",
   venta_tiktok: "Venta TikTok",
 };
 
