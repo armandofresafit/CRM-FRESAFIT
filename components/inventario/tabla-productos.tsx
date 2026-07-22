@@ -14,7 +14,7 @@ import type { ProductConProveedor } from "@/lib/types";
 import { TablaSimple, type Columna } from "@/components/compartido/tabla-simple";
 import { cn } from "@/lib/utils";
 
-const COLS = "grid-cols-[minmax(180px,1fr)_120px_140px_100px_100px_215px]";
+const COLS = "grid-cols-[minmax(180px,1fr)_120px_100px_215px]";
 
 /* Pastilla suave: fondo del color del tipo al 12% de opacidad + texto sólido
    (en vez de fondo sólido + texto blanco), para verse ligera junto a las
@@ -39,14 +39,14 @@ function PastillaTipo({ tipo }: { tipo: string }) {
 function Miniatura({ src, alt }: { src: string | null; alt: string }) {
   if (!src) {
     return (
-      <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground/50">
-        <ImageIcon className="size-4" />
+      <div className="flex size-20 shrink-0 items-center justify-center rounded-lg border bg-muted text-muted-foreground/50">
+        <ImageIcon className="size-6" />
       </div>
     );
   }
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt={alt} loading="lazy" className="size-9 shrink-0 rounded-md border object-cover" />
+    <img src={src} alt={alt} loading="lazy" className="size-20 shrink-0 rounded-lg border object-cover" />
   );
 }
 
@@ -136,16 +136,6 @@ export function TablaProductos({
       ),
     },
     { clave: "tipo", label: "Tipo", celda: (p) => <PastillaTipo tipo={p.tipo} /> },
-    {
-      clave: "proveedor",
-      label: "Proveedor",
-      celda: (p) => (
-        <div className="truncate">
-          {p.proveedor?.nombre ?? <span className="text-muted-foreground/50">—</span>}
-        </div>
-      ),
-    },
-    { clave: "costo", label: "Costo", celda: (p) => <div>{formatearMXN(p.costo)}</div> },
     { clave: "precio", label: "Precio", celda: (p) => <div>{formatearMXN(p.precio)}</div> },
     {
       clave: "stock",
@@ -194,7 +184,7 @@ export function TablaProductos({
       datos={visibles}
       filaKey={(p) => p.id}
       filaClassName={(p) => (!p.activo ? "opacity-50" : "")}
-      minW="min-w-[890px]"
+      minW="min-w-[650px]"
     />
   );
 }
