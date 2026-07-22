@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -13,7 +12,7 @@ import {
   LogOut,
   type LucideIcon,
 } from "lucide-react";
-import logoFresafit from "@/public/logo-fresafit-blanco.png";
+import { LogoFresafit } from "@/components/logo-fresafit";
 import { MODULOS, ROLES } from "@/lib/catalogos";
 import type { Profile } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -76,18 +75,9 @@ export function SidebarContent({
   return (
     <div className="flex min-h-0 flex-1 flex-col p-4.5 pb-4">
       {/* Marca */}
-      <div className="mb-5 flex items-center gap-3 px-1.5 pb-1">
-        <div className="flex size-[42px] shrink-0 items-center justify-center rounded-[13px] bg-primary shadow-[0_6px_16px_-6px_rgba(232,67,147,0.55)]">
-          <Image src={logoFresafit} alt="Fresafit" priority className="h-5 w-auto" />
-        </div>
-        <div className="leading-tight">
-          <div className="font-heading text-lg font-bold tracking-tight text-foreground">
-            FRESA FIT
-          </div>
-          <div className="mt-0.5 text-[11.5px] text-muted-foreground">
-            Sistema interno
-          </div>
-        </div>
+      <div className="mb-5 flex flex-col items-start gap-1.5 px-1.5 pb-1">
+        <LogoFresafit priority className="h-7 w-auto" />
+        <div className="text-[11.5px] text-muted-foreground">Sistema interno</div>
       </div>
 
       {/* Menú de módulos */}

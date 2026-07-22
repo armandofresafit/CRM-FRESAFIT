@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowRight, Eye, EyeOff, Loader2, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { LogoFresafit } from "@/components/logo-fresafit";
 import { cn } from "@/lib/utils";
 
 /* Marca de fresa (mismo trazo que el logo del sidebar), como SVG para que se
@@ -78,12 +79,9 @@ export default function LoginPage() {
           <FresaMark className="absolute right-[20%] top-[60%] size-[30px] animate-[floatSeed_9s_ease-in-out_infinite_0.8s] text-white/[0.12] motion-reduce:animate-none" />
         </div>
 
-        {/* Marca */}
-        <div className="relative flex items-center gap-3.5">
-          <div className="flex size-[46px] shrink-0 items-center justify-center rounded-[14px] bg-white/[0.16] backdrop-blur-sm">
-            <FresaMark className="size-6 text-white" />
-          </div>
-          <div className="font-heading text-[21px] font-bold tracking-[0.5px]">FRESA FIT</div>
+        {/* Marca — el panel es rosa siempre, así que el wordmark va en blanco. */}
+        <div className="relative">
+          <LogoFresafit tono="blanco" priority className="h-8 w-auto" />
         </div>
 
         {/* Titular */}
@@ -109,11 +107,8 @@ export default function LoginPage() {
       <div className="flex flex-1 items-center justify-center p-6 sm:p-10">
         <div className="w-full max-w-[380px]">
           {/* Marca compacta (solo móvil) */}
-          <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <div className="flex size-11 shrink-0 items-center justify-center rounded-[13px] bg-primary shadow-[0_6px_16px_-6px_rgba(232,67,147,0.55)]">
-              <FresaMark className="size-6 text-white" />
-            </div>
-            <div className="font-heading text-lg font-bold tracking-tight">FRESA FIT</div>
+          <div className="mb-8 lg:hidden">
+            <LogoFresafit priority className="h-6 w-auto" />
           </div>
 
           <div className="mb-7">
