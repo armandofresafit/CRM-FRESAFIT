@@ -28,6 +28,61 @@ const CANAL_LABEL: Record<StockLog["canal"], string> = {
   tiktok_shop: "TikTok Shop",
 };
 
+/* ----------------------------------------------------------------------------
+   Agrupado por lote
+   ----------------------------------------------------------------------------
+   Un solo cambio de stock produce VARIOS renglones: el del CRM y uno por cada
+   canal al que se empujó, separados por unos segundos. Leídos en fila parecen
+   tres movimientos distintos —justo la confusión que hay que evitar en una
+   pantalla que existe para auditar quién movió qué—, así que los renglones de un
+   mismo lote comparten color de fondo y se muestran sin la línea que los separa,
+   como un solo bloque.
+
+   Un lote = mismo producto, mismo origen y dentro de un minuto del primero. La
+   ventana acota el grupo: dos ajustes seguidos al mismo producto con un minuto
+   de diferencia son dos lotes, no uno.
+---------------------------------------------------------------------------- */
+const VENTANA_LOTE_MS = 60_000;
+
+/* Dos tintes alternos. Los lotes son contiguos, así que con dos basta para que
+   ninguno se confunda con su vecino, y la tabla no se llena de colores. */
+const TINTES = [
+  "bg-sky-500/[0.09] dark:bg-sky-400/[0.13]",
+  "bg-violet-500/[0.09] dark:bg-violet-400/[0.13]",
+];
+
+type Lote = { tinte: string; ultimo: boolean };
+
+function mismoLote(a: StockLog, b: StockLog): boolean {
+  return (
+    a.producto_id != null &&
+    a.producto_id === b.producto_id &&
+    a.origen === b.origen &&
+    Math.abs(Date.parse(a.creado_en) - Date.parse(b.creado_en)) <= VENTANA_LOTE_MS
+  );
+}
+
+/* Solo los lotes de más de un renglón entran al mapa: un movimiento suelto no
+   necesita señal de agrupación, y así tampoco gasta un tinte. */
+function agruparPorLote(movs: StockLog[]): Map<number, Lote> {
+  const lotes = new Map<number, Lote>();
+  let color = 0;
+  for (let i = 0; i < movs.length; ) {
+    let fin = i;
+    // Se compara siempre contra el PRIMERO, no contra el anterior: si no, una
+    // ristra larga podría encadenarse minuto a minuto sin límite.
+    while (fin + 1 < movs.length && mismoLote(movs[i], movs[fin + 1])) fin++;
+    if (fin > i) {
+      for (let k = i; k <= fin; k++) {
+        lotes.set(movs[k].id, { tinte: TINTES[color % TINTES.length], ultimo: k === fin });
+      }
+      color++;
+    }
+    i = fin + 1;
+  }
+  return lotes;
+}
+
 function fechaHora(iso: string): string {
   return new Date(iso).toLocaleString("es-MX", {
     day: "numeric",
@@ -47,6 +102,8 @@ export function TablaMovimientos({ movimientos }: { movimientos: StockLog[] }) {
       </p>
     );
   }
+
+  const lotes = agruparPorLote(movimientos);
 
   const columnas: Columna<StockLog>[] = [
     {
@@ -126,6 +183,12 @@ export function TablaMovimientos({ movimientos }: { movimientos: StockLog[] }) {
       columnas={columnas}
       datos={movimientos}
       filaKey={(m) => String(m.id)}
+      /* `md:` porque en móvil cada movimiento es una tarjeta con borde completo:
+         quitarle el de abajo la dejaría descuadrada. Ahí agrupa el tinte solo. */
+      filaClassName={(m) => {
+        const lote = lotes.get(m.id);
+        return lote ? cn(lote.tinte, !lote.ultimo && "md:border-b-0") : "";
+      }}
       minW="min-w-[840px]"
       vacio="Sin movimientos."
     />
