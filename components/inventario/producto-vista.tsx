@@ -40,6 +40,7 @@ const ORIGEN_LABEL: Record<string, string> = {
   venta_ml: "Venta Mercado Libre",
   venta_tn: "Venta Tienda Nube",
   venta_tiktok: "Venta TikTok",
+  reparacion: "Reparación automática",
 };
 
 function fechaHora(iso: string): string {

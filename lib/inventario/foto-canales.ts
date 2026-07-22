@@ -11,7 +11,12 @@
    fotos completas mantiene la tabla pequeña: 600 productos × 24 corridas al día
    serían 14 mil filas diarias de las que casi ninguna aporta algo.
 
-   Es SOLO LECTURA frente a los canales: observa, no corrige.
+   Es SOLO LECTURA frente a los canales: observa, no corrige. Lo único que
+   aporta hacia la corrección es la lista de desviaciones ESTABLES —las que ya
+   estaban en la foto anterior con los mismos números—, que es la materia prima
+   de lib/inventario/reparacion.ts. La estabilidad importa: un descuadre que se
+   mueve entre dos fotos suele ser una venta en vuelo que se resolverá sola, y
+   corregirla sería borrarla.
    ============================================================================ */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -21,6 +26,17 @@ export type ResumenFoto = {
   productos: number; // productos observados
   cambios: number; // los que se movieron desde la foto anterior
   nuevos: number; // vistos por primera vez (no cuentan como cambio)
+  /* Descuadres que llevan al menos dos fotos quietos con los mismos números. */
+  estables: DesviacionEstable[];
+};
+
+/* Un producto cuyo stock NO coincide con algún canal, y que además lleva dos
+   lecturas consecutivas sin que ninguno de los tres números se mueva. */
+export type DesviacionEstable = {
+  producto_id: string;
+  stock_crm: number;
+  stock_tn: number | null;
+  stock_ml: number | null;
 };
 
 type FilaCanal = {
@@ -50,6 +66,7 @@ export async function tomarFotoCanales(): Promise<ResumenFoto> {
   const ahora = new Date().toISOString();
   const actuales: (FilaCanal & { visto_en: string })[] = [];
   const cambios: Record<string, unknown>[] = [];
+  const estables: DesviacionEstable[] = [];
   let nuevos = 0;
 
   for (const f of lectura.filas) {
@@ -65,6 +82,24 @@ export async function tomarFotoCanales(): Promise<ResumenFoto> {
     /* Un canal que hoy devuelve null (desconectado, publicación caída) no es un
        cambio: es falta de dato. Solo se compara lo que se pudo leer. */
     const movio = (a: number | null, b: number | null) => a !== null && b !== null && a !== b;
+    const quieto =
+      previa.stock_crm === actual.stock_crm &&
+      previa.stock_tn === actual.stock_tn &&
+      previa.stock_ml === actual.stock_ml;
+    const descuadrado =
+      actual.stock_crm !== null &&
+      ((actual.stock_tn !== null && actual.stock_tn !== actual.stock_crm) ||
+        (actual.stock_ml !== null && actual.stock_ml !== actual.stock_crm));
+    /* Quieto Y descuadrado: nada se movió entre las dos lecturas y aun así los
+       números no coinciden. Eso ya no es una venta en tránsito. */
+    if (quieto && descuadrado) {
+      estables.push({
+        producto_id: f.id,
+        stock_crm: actual.stock_crm!,
+        stock_tn: actual.stock_tn,
+        stock_ml: actual.stock_ml,
+      });
+    }
     if (
       movio(previa.stock_crm, actual.stock_crm) ||
       movio(previa.stock_tn, actual.stock_tn) ||
@@ -94,5 +129,5 @@ export async function tomarFotoCanales(): Promise<ResumenFoto> {
     if (error) throw new Error(error.message);
   }
 
-  return { productos: actuales.length, cambios: cambios.length, nuevos };
+  return { productos: actuales.length, cambios: cambios.length, nuevos, estables };
 }

@@ -54,7 +54,7 @@ const ORIGEN_LOG: Record<OrigenStock, string> = {
 /* Salto máximo que el hub aplica sin intervención humana. Las ventas mueven de
    a una o dos unidades; un salto de decenas es casi siempre un número viejo o
    un error de mapeo, no inventario real. Se reporta en vez de escribirse. */
-const LIMITE_CORDURA = 10;
+export const LIMITE_CORDURA = 10;
 
 /* Cuánto vale una escritura nuestra como "eco": si el canal nos avisa de un
    cambio que somos nosotros mismos, dentro de esta ventana no se re-propaga.
@@ -303,19 +303,33 @@ async function escrituraReciente(
 
 /* Candado cooperativo por producto. Devuelve la función para liberarlo, o null
    si otro proceso lo tiene tomado. Sin id de producto no hay nada que
-   serializar (no debería pasar, pero no es motivo para no escribir). */
+   serializar (no debería pasar, pero no es motivo para no escribir).
+
+   ESPERA antes de rendirse. La primera versión se rendía al instante y eso hacía
+   que un empuje se perdiera entero —los dos canales de un golpe, porque el
+   candado envuelve a ambos—, sin más rastro que un aviso que es fácil no ver.
+   Una operación de stock dura un par de segundos, así que reintentar un momento
+   convierte un choque en una espera corta en vez de en un cambio perdido. */
+const INTENTOS_CANDADO = 4;
+const ESPERA_CANDADO_MS = 900;
+
 async function tomarCandado(
   productoId: string | null | undefined,
 ): Promise<(() => Promise<void>) | null> {
   if (!productoId) return async () => {};
   try {
     const admin = createAdminClient();
-    const { data, error } = await admin.rpc("tomar_candado_stock", {
-      p_producto: productoId,
-      p_segundos: SEGUNDOS_CANDADO,
-    });
-    if (error) throw new Error(error.message);
-    if (data !== true) return null;
+    let tomado = false;
+    for (let intento = 0; intento < INTENTOS_CANDADO && !tomado; intento++) {
+      if (intento > 0) await new Promise((r) => setTimeout(r, ESPERA_CANDADO_MS));
+      const { data, error } = await admin.rpc("tomar_candado_stock", {
+        p_producto: productoId,
+        p_segundos: SEGUNDOS_CANDADO,
+      });
+      if (error) throw new Error(error.message);
+      tomado = data === true;
+    }
+    if (!tomado) return null;
     return async () => {
       try {
         await admin.rpc("liberar_candado_stock", { p_producto: productoId });
